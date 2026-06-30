@@ -7,7 +7,11 @@ import { fileURLToPath } from 'node:url';
 import { Bot, InlineKeyboard, InputFile } from 'grammy';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
-const cfg = JSON.parse(fs.readFileSync(path.join(__dirname, 'config.json'), 'utf8'));
+// конфиг: свой config.json, иначе шаблон (на сервере токен берём из переменной окружения)
+const cfgFile = fs.existsSync(path.join(__dirname, 'config.json')) ? 'config.json' : 'config.example.json';
+const cfg = JSON.parse(fs.readFileSync(path.join(__dirname, cfgFile), 'utf8'));
+const TOKEN = process.env.BOT_TOKEN || cfg.botToken;                                  // env > файл
+const PYTHON = cfg.python || (process.platform === 'win32' ? 'python' : 'python3');   // Linux: python3
 const BG = path.join(__dirname, 'фон.png');
 const EXAMPLE = path.join(__dirname, 'пример карточки.png');   // эталон для показа оператору
 const TMP = path.join(__dirname, '.tmp');                  // внутреннее (job-файлы, превью сдвига)
@@ -19,7 +23,7 @@ const LIMIT = cfg.limits.charsPerLine;
 const pad2 = (n) => String(n).padStart(2, '0');
 const stamp = () => { const d = new Date(); return `${pad2(d.getHours())}${pad2(d.getMinutes())}${pad2(d.getSeconds())}`; };
 
-const bot = new Bot(cfg.botToken);
+const bot = new Bot(TOKEN);
 
 // ── состояние диалога ───────────────────────────────────────────────────────
 const S = new Map();
@@ -155,13 +159,13 @@ async function downloadPhoto(ctx, destNoExt) {
     if (f.startsWith(base + '.')) { try { fs.unlinkSync(path.join(path.dirname(destNoExt), f)); } catch {} }
   }
   const dest = destNoExt + '.' + ext;
-  const url = `https://api.telegram.org/file/bot${cfg.botToken}/${file.file_path}`;
+  const url = `https://api.telegram.org/file/bot${TOKEN}/${file.file_path}`;
   fs.writeFileSync(dest, Buffer.from(await (await fetch(url)).arrayBuffer()));
   return dest;
 }
 function runCutout(input, output) {
   return new Promise((resolve) => {
-    const py = spawn('python', [path.join(__dirname, 'cutout.py'), input, output, cfg.model]);
+    const py = spawn(PYTHON, [path.join(__dirname, 'cutout.py'), input, output, cfg.model]);
     let out = '';
     py.stdout.on('data', (d) => (out += d));
     py.on('close', () => {

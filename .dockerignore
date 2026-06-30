@@ -1,0 +1,10 @@
+node_modules
+.git
+.tmp
+config.json
+backups
+start.bat
+test-render.mjs
+загруженные фото
+без фона
+готовые карточки

@@ -1,0 +1,13 @@
+# Запуск бота на сервере одной командой:  docker compose up -d --build
+# Перед этим создай файл .env рядом:  BOT_TOKEN=твой_токен_от_botfather
+services:
+  bot:
+    build: .
+    image: operator-bot
+    restart: unless-stopped          # авто-перезапуск + старт при перезагрузке сервера
+    environment:
+      - BOT_TOKEN=${BOT_TOKEN}
+    volumes:                          # чтобы файлы сохранялись на сервере (вне контейнера)
+      - ./готовые карточки:/app/готовые карточки
+      - ./без фона:/app/без фона
+      - ./загруженные фото:/app/загруженные фото
