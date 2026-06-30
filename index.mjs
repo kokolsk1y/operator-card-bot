@@ -5,7 +5,6 @@ import path from 'node:path';
 import { spawn } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import { Bot, InlineKeyboard, InputFile } from 'grammy';
-import { renderCard } from './render.mjs';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const cfg = JSON.parse(fs.readFileSync(path.join(__dirname, 'config.json'), 'utf8'));
@@ -80,10 +79,24 @@ function adjCaption(s) {
   return `📐 Двигаю: *${t.label}*\nсмещение  x:${o.x}  y:${o.y}  ·  шаг ${s.adjStep}px\n` +
     `◀ ▶ — выбрать элемент, стрелки — двигать.`;
 }
+// рендер — в ОТДЕЛЬНОМ процессе (render-worker.mjs). Падение рендера не убьёт бота.
 function renderToFile(s, out) {
-  return renderCard({
-    bgPath: BG, productPath: s.cutout, title: s.title, badge: s.badge,
-    mainChar: s.chars[0] || null, chars: stripsOf(s), offsets: s.offsets, outPath: out,
+  return new Promise((resolve, reject) => {
+    const job = {
+      bgPath: BG, productPath: s.cutout, title: s.title, badge: s.badge,
+      mainChar: s.chars[0] || null, chars: stripsOf(s), offsets: s.offsets, outPath: out,
+    };
+    const jobPath = out.replace(/\.png$/, '') + '.job.json';
+    fs.writeFileSync(jobPath, JSON.stringify(job));
+    const child = spawn('node', [path.join(__dirname, 'render-worker.mjs'), jobPath], { windowsHide: true });
+    let err = '';
+    child.stderr.on('data', (d) => (err += d));
+    child.on('error', (e) => reject(new Error('не удалось запустить рендер: ' + e.message)));
+    child.on('close', (code) => {
+      try { fs.unlinkSync(jobPath); } catch {}
+      if (code === 0 && fs.existsSync(out)) resolve(out);
+      else reject(new Error('рендер не удался' + (err ? ': ' + err.slice(0, 300) : '')));
+    });
   });
 }
 
@@ -257,4 +270,7 @@ bot.on('callback_query:data', async (ctx) => {
 });
 
 bot.catch((err) => console.error('Bot error:', err.error?.message || err.message));
+// страховка: не падать от неожиданных ошибок (рендер уже изолирован в подпроцессе)
+process.on('unhandledRejection', (e) => console.error('unhandledRejection:', e?.message || e));
+process.on('uncaughtException', (e) => console.error('uncaughtException:', e?.message || e));
 bot.start({ onStart: (i) => console.log(`✅ Бот @${i.username} запущен. Ctrl+C — стоп.`) });

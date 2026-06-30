@@ -2,11 +2,11 @@
 chcp 65001 >nul
 cd /d "%~dp0"
 echo ============================================
-echo   Бот операторов запускается...
-echo   НЕ ЗАКРЫВАЙ это окно, пока нужен бот.
-echo   Остановить: закрой окно или нажми Ctrl+C
+echo   Bot is starting... DO NOT close this window
+echo   Stop: close window or press Ctrl+C
 echo ============================================
+echo.
 node index.mjs
 echo.
-echo Бот остановлен. Окно можно закрыть.
+echo Bot stopped. You can close this window.
 pause
