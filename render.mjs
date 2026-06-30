@@ -16,8 +16,8 @@ const FONTS_DIR = path.join(path.dirname(require.resolve('@fontsource/montserrat
 const LAYOUT = {
   W: 900, H: 1200, scale: 2,
   colors: { white: '#f1f2f7', orange: '#E0643C' },
-  title: {                                   // во всю ширину, по центру
-    top: 60, bigSize: 120,
+  title: {                                   // по центру, с боковыми отступами
+    margin: 48, top: 60, bigSize: 120,
     subTop: 190, subSize: 48,
   },
   badge: { top: 252, padX: 26, padY: 12, size: 40, radius: 18, border: 3 },  // по центру
@@ -66,11 +66,12 @@ function buildHtml({ bgB64, productB64, title, badge, mainChar, chars, offsets }
 
   // заголовок: большое слово + подзаголовок — во всю ширину, по центру
   const ot = o('title');
+  const tMar = L.title.margin, tW = L.W - 2 * tMar;
   const titleHtml = `
-    <div class="abs" style="left:${ot.x}px;top:${L.title.top + ot.y}px;width:${L.W}px">
+    <div class="abs" style="left:${tMar + ot.x}px;top:${L.title.top + ot.y}px;width:${tW}px">
       <div class="fit big upper center" style="font-size:${L.title.bigSize}px">${esc(title.big)}</div>
     </div>
-    ${title.sub ? `<div class="abs" style="left:${ot.x}px;top:${L.title.subTop + ot.y}px;width:${L.W}px">
+    ${title.sub ? `<div class="abs" style="left:${tMar + ot.x}px;top:${L.title.subTop + ot.y}px;width:${tW}px">
       <div class="fit big upper center" style="font-size:${L.title.subSize}px">${esc(title.sub)}</div></div>` : ''}`;
 
   // бейдж в рамке — по центру карточки
