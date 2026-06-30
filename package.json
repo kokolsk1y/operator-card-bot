@@ -1,0 +1,20 @@
+{
+  "name": "operator-card-bot",
+  "version": "1.0.0",
+  "description": "Telegram-бот для операторов: генератор карточек товаров (фон + заголовок + фото с авто-вырезкой + характеристики)",
+  "type": "module",
+  "main": "index.mjs",
+  "scripts": {
+    "start": "node index.mjs",
+    "test-render": "node test-render.mjs"
+  },
+  "engines": {
+    "node": ">=20.0.0"
+  },
+  "dependencies": {
+    "@fontsource/montserrat": "5.1.0",
+    "grammy": "^1.44.0",
+    "puppeteer": "22.15.0",
+    "sharp": "0.34.1"
+  }
+}
