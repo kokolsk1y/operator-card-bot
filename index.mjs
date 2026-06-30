@@ -9,40 +9,50 @@ import { Bot, InlineKeyboard, InputFile } from 'grammy';
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const cfg = JSON.parse(fs.readFileSync(path.join(__dirname, 'config.json'), 'utf8'));
 const BG = path.join(__dirname, 'фон.png');
-const TMP = path.join(__dirname, '.tmp');
+const EXAMPLE = path.join(__dirname, 'пример карточки.png');   // эталон для показа оператору
+const TMP = path.join(__dirname, '.tmp');                  // внутреннее (job-файлы, превью сдвига)
+const DIR_UP = path.join(__dirname, 'загруженные фото');   // что прислал оператор
+const DIR_CUT = path.join(__dirname, 'без фона');          // вырезанный товар
+const DIR_CARD = path.join(__dirname, 'готовые карточки'); // итоговые карточки
 const LIMIT = cfg.limits.charsPerLine;
-fs.mkdirSync(TMP, { recursive: true });
+[TMP, DIR_UP, DIR_CUT, DIR_CARD].forEach((d) => fs.mkdirSync(d, { recursive: true }));
+const pad2 = (n) => String(n).padStart(2, '0');
+const stamp = () => { const d = new Date(); return `${pad2(d.getHours())}${pad2(d.getMinutes())}${pad2(d.getSeconds())}`; };
 
 const bot = new Bot(cfg.botToken);
 
 // ── состояние диалога ───────────────────────────────────────────────────────
 const S = new Map();
 const STEP = { NAME: 'name', BADGE: 'badge', PHOTO: 'photo', CHAR: 'char' };
-const newSession = () => ({ step: null, title: null, badge: null, cutout: '', chars: [], idx: 0, editing: null,
-  offsets: {}, adjTargets: [], adjIdx: 0, adjStep: 10 });
+const newSession = () => ({ step: null, title: null, badge: null, cutout: '', cutStatus: null, cutPromise: null,
+  chars: [], idx: 0, editing: null, offsets: {}, adjTargets: [], adjIdx: 0, adjStep: 10 });
 const STEPS = [5, 10, 20];
 const get = (id) => { if (!S.has(id)) S.set(id, newSession()); return S.get(id); };
 
 // ── разбор ввода ─────────────────────────────────────────────────────────────
-// заголовок: "Удлинитель / с выключателем" или просто "Удлинитель с выключателем"
+// Разделитель строк — «^» ИЛИ перенос строки. «/» больше НЕ разделяет (данные «16/250 В» не ломаются).
+const SEP = /\s*\^\s*|\r?\n/;
+const splitParts = (t) => t.split(SEP).map((s) => s.trim());
+// заголовок: "Удлинитель ^ с выключателем" / с новой строки / или "Удлинитель с выключателем"
 function splitTitle(t) {
   t = t.trim();
-  if (t.includes('/')) { const i = t.indexOf('/'); return { big: t.slice(0, i).trim(), sub: t.slice(i + 1).trim() }; }
-  const m = t.match(/^(\S+)\s+([\s\S]+)$/);
+  const p = splitParts(t).filter(Boolean);
+  if (p.length >= 2) return { big: p[0], sub: p.slice(1).join(' ') };
+  const m = t.match(/^(\S+)\s+([\s\S]+)$/);     // нет разделителя — 1-е слово большое, остальное подзаголовок
   return m ? { big: m[1], sub: m[2] } : { big: t, sub: '' };
 }
-// характеристика: "значение / подпись / примечание"
+// характеристика: "значение ^ подпись ^ примечание"
 function parseChar(t) {
-  const p = t.split('/').map((s) => s.trim());
+  const p = splitParts(t);
   return { big: p[0] || '', small: p[1] || '', note: p[2] || '' };
 }
 // проверка длины каждой части (чтобы влезло в строку)
-function tooLong(t) { return t.split('/').map((s) => s.trim()).find((s) => s.length > LIMIT); }
+function tooLong(t) { return splitParts(t).find((s) => s.length > LIMIT); }
 
 const CHAR_PROMPTS = [
-  `📊 *Главная характеристика* (в оранжевом квадрате).\nМожно в 2 строки через «/»:  \`значение / подпись\`\nНапример: \`1,5 / метра\``,
-  `📋 *Характеристика №2* (полоска).\nЧерез «/»:  \`значение / подпись / примечание\`\nНапример: \`ПВС / 3х1 мм\``,
-  `📋 *Характеристика №3* (полоска).\nНапример: \`10А / нагрузка / *до 2300Вт\``,
+  `📊 *Главная характеристика* (в оранжевом квадрате).\nДве строки — через «^» или с новой строки:\n\`1,5 ^ метра\`\n_Если характеристики не нужны — жми «Пропустить», тогда фото встанет по центру._`,
+  `📋 *Характеристика №2* (полоска).\nЗначение ^ подпись ^ примечание:\n\`ПВС ^ 3х1 мм\``,
+  `📋 *Характеристика №3* (полоска).\nНапример: \`10А ^ нагрузка ^ *до 2300Вт\``,
   `📋 *Характеристика №4* (полоска).\nНапример: \`3 розетки\``,
 ];
 
@@ -103,10 +113,18 @@ function renderToFile(s, out) {
 }
 
 // ── утилиты ──────────────────────────────────────────────────────────────────
-async function downloadPhoto(ctx, dest) {
+// скачивает фото в «загруженные фото/<chatid>.<ext>», возвращает путь
+async function downloadPhoto(ctx, destNoExt) {
   const file = await ctx.getFile();
+  const ext = (String(file.file_path).match(/\.(\w+)$/)?.[1] || 'jpg').toLowerCase();
+  const base = path.basename(destNoExt);
+  for (const f of fs.readdirSync(path.dirname(destNoExt))) {        // убрать прежнюю загрузку этого чата
+    if (f.startsWith(base + '.')) { try { fs.unlinkSync(path.join(path.dirname(destNoExt), f)); } catch {} }
+  }
+  const dest = destNoExt + '.' + ext;
   const url = `https://api.telegram.org/file/bot${cfg.botToken}/${file.file_path}`;
   fs.writeFileSync(dest, Buffer.from(await (await fetch(url)).arrayBuffer()));
+  return dest;
 }
 function runCutout(input, output) {
   return new Promise((resolve) => {
@@ -121,8 +139,16 @@ function runCutout(input, output) {
 }
 
 async function buildCard(ctx, s) {
+  // дождаться фоновой вырезки фона, если ещё идёт
+  if (s.cutStatus === 'pending' && s.cutPromise) {
+    await ctx.reply('⏳ Ещё убираю фон, пара секунд…');
+    try { await s.cutPromise; } catch {}
+  }
+  if (!s.cutout || s.cutStatus === 'fail') {
+    return ctx.reply('⚠️ Нет готового фото товара. Пришли фото товара и попробуй снова.');
+  }
   await ctx.reply('⚙️ Собираю карточку, пара секунд…');
-  const out = path.join(TMP, `card_${ctx.chat.id}.png`);
+  const out = path.join(DIR_CARD, `${ctx.chat.id}_${stamp()}.png`);
   try {
     await renderToFile(s, out);
     await ctx.replyWithDocument(new InputFile(out, 'card.png'), {
@@ -140,8 +166,8 @@ function afterField(ctx, s, nextStepFn) {
 }
 
 const askName = (ctx, s) => { s.step = STEP.NAME;
-  return ctx.reply('✍️ Шаг 1. Пришли *название товара* (станет заголовком).\n' +
-    'Большое слово и подзаголовок можно разделить «/»:  `Удлинитель / с выключателем`',
+  return ctx.reply('✍️ Шаг 1. Пришли *название товара* (станет заголовком по центру).\n' +
+    'Большое слово и подзаголовок раздели «^» или новой строкой:  `Удлинитель ^ с выключателем`',
     { parse_mode: 'Markdown' }); };
 const askBadge = (ctx, s) => { s.step = STEP.BADGE;
   return ctx.reply('🏷 Шаг 1б. Бейдж в рамке под заголовком — *опционально*.\n' +
@@ -155,11 +181,17 @@ const askChar = (ctx, s) => { s.step = STEP.CHAR;
   return ctx.reply(CHAR_PROMPTS[s.idx] + extra, { parse_mode: 'Markdown', reply_markup: kbChar() }); };
 
 // ── команды ───────────────────────────────────────────────────────────────
-bot.command(['start', 'new'], async (ctx) => {
+async function startNew(ctx, showExample) {
   S.set(ctx.chat.id, newSession());
-  await ctx.reply('👋 Привет! Я собираю карточки товаров. Сделаем новую — по шагам.');
+  if (showExample) {
+    await ctx.replyWithPhoto(new InputFile(EXAMPLE), {
+      caption: '👋 Привет! Я собираю карточки товаров.\n\n👆 Вот так должна выглядеть готовая карточка — к этому идём. Сейчас сделаем по шагам.',
+    }).catch(() => {});
+  }
   await askName(ctx, get(ctx.chat.id));
-});
+}
+bot.command('start', (ctx) => startNew(ctx, true));   // /start — с примером
+bot.command('new', (ctx) => startNew(ctx, false));    // /new — без примера
 
 // ── текст ────────────────────────────────────────────────────────────────────
 bot.on('message:text', async (ctx) => {
@@ -194,23 +226,41 @@ bot.on('message:text', async (ctx) => {
 });
 
 // ── обработка фото товара (и как фото, и как файл-изображение) ───────────────
+// Вырезка фона идёт В ФОНЕ — оператор сразу пишет дальше, результат прилетит позже.
 async function handleProductImage(ctx, s) {
   if (s.step !== STEP.PHOTO) return ctx.reply('Сначала /new, потом по шагам пришлёшь фото 🙂');
-  const proc = await ctx.reply('⏳ Обрабатываю фото: убираю фон… (~15 сек)');
-  const del = () => ctx.api.deleteMessage(ctx.chat.id, proc.message_id).catch(() => {});
-  const src = path.join(TMP, `src_${ctx.chat.id}.png`);
-  const cut = path.join(TMP, `cut_${ctx.chat.id}.png`);
-  try { await downloadPhoto(ctx, src); }
-  catch { await del(); return ctx.reply('Не смог скачать фото, пришли ещё раз.'); }
-  const r = await runCutout(src, cut);
-  await del();                                            // убираем «Обрабатываю…»
-  if (r.status === 'fail') return ctx.reply('❌ ' + (r.message || 'не получилось') + '\nПришли другое фото.');
-  s.cutout = cut;
-  const note = r.status === 'warn' ? '\n⚠️ ' + r.message : '\nЕсли всё ок — жмём дальше.';
-  const kb = new InlineKeyboard().text('✅ Дальше', 'photo_ok').text('🔁 Переснять', 'photo_retry');
-  await ctx.replyWithPhoto(new InputFile(cut), {
-    caption: '🪄 Вот товар без фона (со свечением будет на карточке).' + note, reply_markup: kb,
-  });
+  let src;
+  try { src = await downloadPhoto(ctx, path.join(DIR_UP, String(ctx.chat.id))); }
+  catch { return ctx.reply('Не смог скачать фото, пришли ещё раз.'); }
+  const cut = path.join(DIR_CUT, `${ctx.chat.id}.png`);
+
+  const wasEditingPhoto = s.editing === 'photo';
+  const hadChars = s.chars.length > 0;
+
+  // запускаем вырезку фона В ФОНЕ — НЕ ждём
+  s.cutout = ''; s.cutStatus = 'pending';
+  s.cutPromise = (async () => {
+    let r;
+    try { r = await runCutout(src, cut); } catch { r = { status: 'fail', message: 'ошибка обработки' }; }
+    if (r.status === 'fail') {
+      s.cutStatus = 'fail';
+      await ctx.reply('❌ Фон убрать не удалось: ' + (r.message || '') + '\nПришли другое фото товара.').catch(() => {});
+      return;
+    }
+    s.cutout = cut; s.cutStatus = r.status;
+    const note = r.status === 'warn' ? '\n⚠️ ' + r.message : '';
+    await ctx.replyWithPhoto(new InputFile(cut), {
+      caption: '🪄 Фон убран — вот товар.' + note,
+      reply_markup: new InlineKeyboard().text('🔁 Переснять фото', 'photo_retry'),
+    }).catch(() => {});
+    if (wasEditingPhoto) { s.editing = null; await buildCard(ctx, s).catch(() => {}); }  // правка фото → авто-пересборка
+  })();
+
+  if (wasEditingPhoto) return ctx.reply('📸 Фото принял! Убираю фон в фоне — пересоберу карточку, когда будет готово.');
+  if (hadChars) return ctx.reply('📸 Новое фото принял! Убираю фон в фоне.', { reply_markup: new InlineKeyboard().text('✅ Собрать карточку', 'build') });
+  s.idx = 0; s.chars = [];
+  await ctx.reply('📸 Фото получил! Убираю фон в фоне 🪄 — а ты пока заполняй характеристики 👇');
+  return askChar(ctx, s);
 }
 bot.on('message:photo', (ctx) => handleProductImage(ctx, get(ctx.chat.id)));
 bot.on('message:document', (ctx) => {
@@ -226,9 +276,8 @@ bot.on('callback_query:data', async (ctx) => {
   const d = ctx.callbackQuery.data;
   await ctx.answerCallbackQuery();
 
-  if (d === 'new') { S.set(ctx.chat.id, newSession()); return askName(ctx, get(ctx.chat.id)); }
-  if (d === 'photo_retry') return askPhoto(ctx, s);
-  if (d === 'photo_ok') return afterField(ctx, s, () => { s.idx = 0; s.chars = []; return askChar(ctx, s); });
+  if (d === 'new') return startNew(ctx, false);
+  if (d === 'photo_retry') { s.step = STEP.PHOTO; return askPhoto(ctx, s); }
   if (d === 'build') { s.step = null; return buildCard(ctx, s); }
   if (d === 'skip') {
     if (s.step === STEP.BADGE) { s.badge = null; return afterField(ctx, s, () => askPhoto(ctx, s)); }

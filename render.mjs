@@ -16,17 +16,18 @@ const FONTS_DIR = path.join(path.dirname(require.resolve('@fontsource/montserrat
 const LAYOUT = {
   W: 900, H: 1200, scale: 2,
   colors: { white: '#f1f2f7', orange: '#E0643C' },
-  title: {
-    bigLeft: 146, bigTop: 60, bigW: 730, bigSize: 120,
-    subLeft: 148, subTop: 190, subW: 700, subSize: 48,
+  title: {                                   // во всю ширину, по центру
+    top: 60, bigSize: 120,
+    subTop: 190, subSize: 48,
   },
-  badge: { left: 270, top: 252, padX: 26, padY: 12, size: 40, radius: 18, border: 3 },
+  badge: { top: 252, padX: 26, padY: 12, size: 40, radius: 18, border: 3 },  // по центру
   square: { left: 42, top: 360, width: 176, height: 140, radius: 16,
             bigSize: 84, smallSize: 32 },
   chars: { left: 46, top: 552, width: 210, pitch: 152,
            bigSize: 66, bigAloneSize: 50, smallSize: 40, noteSize: 22,
            divW: 172, divH: 3, divGap: 12 },
-  product: { left: 312, top: 208, width: 560, height: 920 },
+  product: { left: 312, top: 208, width: 560, height: 920 },          // когда есть характеристики (справа)
+  productCentered: { left: 150, top: 300, width: 600, height: 840 },  // когда характеристик нет (по центру)
 };
 
 function b64(file) { return fs.readFileSync(file).toString('base64'); }
@@ -56,25 +57,29 @@ function buildHtml({ bgB64, productB64, title, badge, mainChar, chars, offsets }
   const L = LAYOUT;
   const o = (k) => (offsets && offsets[k]) || { x: 0, y: 0 };  // смещение элемента
   const g = o('group');                                        // смещение всей группы (оранж + хар-ки)
+  const hasChars = !!(mainChar || (chars && chars.length));    // есть ли вообще характеристики
+  const pz = hasChars ? L.product : L.productCentered;         // нет характеристик → товар по центру
+  const op = o('product');
   const fontsCss =
     fontFace(800, 'montserrat-latin-800-normal.woff2', RANGE_LATIN) +
     fontFace(800, 'montserrat-cyrillic-800-normal.woff2', RANGE_CYR);
 
-  // заголовок: большое слово + подзаголовок
+  // заголовок: большое слово + подзаголовок — во всю ширину, по центру
   const ot = o('title');
   const titleHtml = `
-    <div class="abs fitbox" style="left:${L.title.bigLeft + ot.x}px;top:${L.title.bigTop + ot.y}px;width:${L.title.bigW}px">
-      <div class="fit big upper" style="font-size:${L.title.bigSize}px">${esc(title.big)}</div>
+    <div class="abs" style="left:${ot.x}px;top:${L.title.top + ot.y}px;width:${L.W}px">
+      <div class="fit big upper center" style="font-size:${L.title.bigSize}px">${esc(title.big)}</div>
     </div>
-    ${title.sub ? `<div class="abs fitbox" style="left:${L.title.subLeft + ot.x}px;top:${L.title.subTop + ot.y}px;width:${L.title.subW}px">
-      <div class="fit big upper" style="font-size:${L.title.subSize}px">${esc(title.sub)}</div></div>` : ''}`;
+    ${title.sub ? `<div class="abs" style="left:${ot.x}px;top:${L.title.subTop + ot.y}px;width:${L.W}px">
+      <div class="fit big upper center" style="font-size:${L.title.subSize}px">${esc(title.sub)}</div></div>` : ''}`;
 
+  // бейдж в рамке — по центру карточки
   const ob = o('badge');
   const badgeHtml = badge ? `
-    <div class="abs badge" style="left:${L.badge.left + ob.x}px;top:${L.badge.top + ob.y}px;
-         padding:${L.badge.padY}px ${L.badge.padX}px;border:${L.badge.border}px solid ${L.colors.white};
-         border-radius:${L.badge.radius}px">
-      <span class="badge-t" style="font-size:${L.badge.size}px">${esc(badge)}</span></div>` : '';
+    <div class="abs" style="left:${ob.x}px;top:${L.badge.top + ob.y}px;width:${L.W}px;text-align:center">
+      <span class="badge" style="padding:${L.badge.padY}px ${L.badge.padX}px;border:${L.badge.border}px solid ${L.colors.white};border-radius:${L.badge.radius}px">
+        <span class="badge-t" style="font-size:${L.badge.size}px">${esc(badge)}</span></span>
+    </div>` : '';
 
   // оранжевый квадрат: значение + подпись (двигается вместе с группой)
   const sq = mainChar; const os = o('square');
@@ -108,6 +113,7 @@ function buildHtml({ bgB64, productB64, title, badge, mainChar, chars, offsets }
     .abs{position:absolute}
     .fit{display:block;width:100%;white-space:nowrap;font-weight:800;line-height:1.04}
     .upper{text-transform:uppercase}
+    .center{text-align:center}
     .big{letter-spacing:-0.5px}
     .square{display:flex;flex-direction:column;align-items:center;justify-content:center;text-align:center;padding:6px 12px}
     .badge{display:inline-flex;align-items:center}
@@ -115,9 +121,7 @@ function buildHtml({ bgB64, productB64, title, badge, mainChar, chars, offsets }
     .cblock .fit{margin-bottom:2px}
     .note{text-transform:none;opacity:.95}
     .divider{background:${L.colors.white};opacity:.9;border-radius:2px}
-    .product{position:absolute;left:${L.product.left + o('product').x}px;top:${L.product.top + o('product').y}px;
-             width:${L.product.width}px;height:${L.product.height}px;
-             display:flex;align-items:center;justify-content:center}
+    .product{position:absolute;display:flex;align-items:center;justify-content:center}
     .product img{max-width:100%;max-height:100%;object-fit:contain;
        filter:drop-shadow(0 0 14px rgba(255,255,255,.85)) drop-shadow(0 0 30px rgba(255,255,255,.55));}
   </style></head><body>
@@ -127,7 +131,7 @@ function buildHtml({ bgB64, productB64, title, badge, mainChar, chars, offsets }
       ${badgeHtml}
       ${squareHtml}
       ${charsHtml}
-      <div class="product"><img src="data:image/png;base64,${productB64}"></div>
+      <div class="product" style="left:${pz.left + op.x}px;top:${pz.top + op.y}px;width:${pz.width}px;height:${pz.height}px"><img src="data:image/png;base64,${productB64}"></div>
     </div>
   </body></html>`;
 }
