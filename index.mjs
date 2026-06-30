@@ -86,15 +86,17 @@ function renderToFile(s, out) {
       bgPath: BG, productPath: s.cutout, title: s.title, badge: s.badge,
       mainChar: s.chars[0] || null, chars: stripsOf(s), offsets: s.offsets, outPath: out,
     };
+    try { if (fs.existsSync(out)) fs.unlinkSync(out); } catch {}   // убрать старую карточку
     const jobPath = out.replace(/\.png$/, '') + '.job.json';
     fs.writeFileSync(jobPath, JSON.stringify(job));
     const child = spawn('node', [path.join(__dirname, 'render-worker.mjs'), jobPath], { windowsHide: true });
     let err = '';
     child.stderr.on('data', (d) => (err += d));
     child.on('error', (e) => reject(new Error('не удалось запустить рендер: ' + e.message)));
-    child.on('close', (code) => {
+    child.on('close', () => {
       try { fs.unlinkSync(jobPath); } catch {}
-      if (code === 0 && fs.existsSync(out)) resolve(out);
+      // успех = карточка записана (даже если воркер упал на закрытии chromium)
+      if (fs.existsSync(out)) resolve(out);
       else reject(new Error('рендер не удался' + (err ? ': ' + err.slice(0, 300) : '')));
     });
   });

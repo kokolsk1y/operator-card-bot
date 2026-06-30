@@ -172,7 +172,7 @@ export async function renderCard({ bgPath, productPath, title, badge, mainChar, 
     await sharp(png).resize(LAYOUT.W, LAYOUT.H, { fit: 'fill' }).png().toFile(outPath);
     return outPath;
   } finally {
-    await page.close();
+    try { await page.close(); } catch {}   // закрытие не должно влиять на результат
   }
 }
 
