@@ -6,7 +6,8 @@
   "main": "index.mjs",
   "scripts": {
     "start": "node index.mjs",
-    "test-render": "node test-render.mjs"
+    "test-render": "node test-render.mjs",
+    "postinstall": "puppeteer browsers install chrome"
   },
   "engines": {
     "node": ">=20.0.0"

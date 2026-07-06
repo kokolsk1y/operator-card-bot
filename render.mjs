@@ -15,7 +15,7 @@ const FONTS_DIR = path.join(path.dirname(require.resolve('@fontsource/montserrat
 // ── единое место правки макета (px при ширине 900×1200) ─────────────────────
 const LAYOUT = {
   W: 900, H: 1200, scale: 2,
-  colors: { white: '#f1f2f7', orange: '#E0643C' },
+  colors: { white: '#F2EBEB', orange: '#E0643C' },
   title: {                                   // по центру, с боковыми отступами
     margin: 48, top: 60, bigSize: 120,
     subTop: 190, subSize: 48,
