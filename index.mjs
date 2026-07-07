@@ -29,8 +29,19 @@ const bot = new Bot(TOKEN);
 const S = new Map();
 const STEP = { NAME: 'name', BADGE: 'badge', PHOTO: 'photo', CHAR: 'char' };
 const newSession = () => ({ step: null, title: null, badge: null, cutout: '', cutStatus: null, cutPromise: null,
-  chars: [], idx: 0, editing: null, offsets: {}, adjTargets: [], adjIdx: 0, adjStep: 10 });
+  cutLightness: null, glow: 'auto', chars: [], idx: 0, editing: null,
+  offsets: {}, adjTargets: [], adjIdx: 0, adjStep: 10 });
 const STEPS = [5, 10, 20];
+
+// свечение вокруг товара: авто по ДОЛЕ светлых пикселей (белый товар → меньше свечения)
+function autoGlow(brightPct) {
+  if (brightPct == null) return 2;
+  if (brightPct >= 55) return 1;   // много светлого (белый товар) → слабое
+  if (brightPct >= 28) return 2;   // средний
+  return 3;                        // тёмный → сильное
+}
+const resolveGlow = (s) => (s.glow === 'auto' ? autoGlow(s.cutLightness) : s.glow);
+const glowLabel = (g) => (g === 'auto' ? 'авто' : ['нет', 'слабое', 'среднее', 'сильное'][g]);
 const get = (id) => { if (!S.has(id)) S.set(id, newSession()); return S.get(id); };
 
 // ── разбор ввода ─────────────────────────────────────────────────────────────
@@ -99,7 +110,7 @@ const kbChar = () => new InlineKeyboard().text('⏭ Пропустить', 'skip
 const kbAfter = () => new InlineKeyboard()
   .text('🔄 Заголовок', 'edit_title').text('🖼 Фото', 'edit_photo').row()
   .text('📝 Характеристики', 'edit_chars').text('📐 Подвинуть', 'adjust').row()
-  .text('🆕 Новая карточка', 'new');
+  .text('🔆 Свечение', 'glow').text('🆕 Новая', 'new');
 
 // ── режим «подвинуть»: цель, клавиатура, подпись ────────────────────────────
 const stripsOf = (s) => s.chars.slice(1).filter(Boolean);
@@ -131,7 +142,7 @@ function renderToFile(s, out) {
   return new Promise((resolve, reject) => {
     const job = {
       bgPath: BG, productPath: s.cutout, title: s.title, badge: s.badge,
-      mainChar: s.chars[0] || null, chars: stripsOf(s), offsets: s.offsets, outPath: out,
+      mainChar: s.chars[0] || null, chars: stripsOf(s), offsets: s.offsets, glow: resolveGlow(s), outPath: out,
     };
     try { if (fs.existsSync(out)) fs.unlinkSync(out); } catch {}   // убрать старую карточку
     const jobPath = out.replace(/\.png$/, '') + '.job.json';
@@ -285,7 +296,7 @@ async function handleProductImage(ctx, s) {
       await ctx.reply('❌ Фон убрать не удалось: ' + (r.message || '') + '\nПришли другое фото товара.').catch(() => {});
       return;
     }
-    s.cutout = cut; s.cutStatus = r.status;
+    s.cutout = cut; s.cutStatus = r.status; s.cutLightness = r.bright_pct ?? null;
     const note = r.status === 'warn' ? '\n⚠️ ' + r.message : '';
     await ctx.replyWithPhoto(new InputFile(cut), {
       caption: '🪄 Фон убран — вот товар.' + note,
@@ -326,6 +337,12 @@ bot.on('callback_query:data', async (ctx) => {
   if (d === 'edit_title') { s.editing = 'title'; return askName(ctx, s); }
   if (d === 'edit_photo') { s.editing = 'photo'; return askPhoto(ctx, s); }
   if (d === 'edit_chars') { s.editing = 'chars'; s.idx = 0; s.chars = []; return askChar(ctx, s); }
+  if (d === 'glow') {   // цикл: авто → нет → слабое → среднее → сильное
+    const order = ['auto', 0, 1, 2, 3];
+    s.glow = order[(order.indexOf(s.glow) + 1) % order.length];
+    await ctx.reply('🔆 Свечение: ' + glowLabel(s.glow));
+    return buildCard(ctx, s);
+  }
 
   // ── режим «подвинуть» ──
   if (d === 'adjust') {

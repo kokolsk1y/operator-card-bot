@@ -40,12 +40,21 @@ def main():
     fg_pct = fg / tot * 100
     semi_pct = semi / tot * 100
 
+    # яркость товара + ДОЛЯ светлых пикселей — для авто-свечения (много светлого = белый товар -> меньше свечения)
+    fgmask = alpha > 128
+    if fgmask.any():
+        px = a[:, :, :3][fgmask].astype(np.float32).mean(axis=1)   # яркость каждого пикселя товара
+        lightness = float(px.mean()); bright_pct = float((px > 170).mean() * 100)
+    else:
+        lightness, bright_pct = 128.0, 30.0
+
     # фрагментированность силуэта (грубо) — сколько отдельных кусков переднего плана
+    n_fg = 1
     try:
         from scipy import ndimage
         _, n_fg = ndimage.label(alpha > 128)
     except Exception:
-        n_fg = 1
+        pass
 
     # --- вердикт качества ---
     status, message = "ok", "товар вырезан"
@@ -74,7 +83,8 @@ def main():
     print(json.dumps({
         "status": status, "message": message,
         "fg_pct": round(fg_pct, 1), "semi_pct": round(semi_pct, 2),
-        "n_fg": int(n_fg), "width": img.width, "height": img.height,
+        "n_fg": int(n_fg), "lightness": round(lightness, 1), "bright_pct": round(bright_pct, 1),
+        "width": img.width, "height": img.height,
     }, ensure_ascii=False))
 
 if __name__ == "__main__":

@@ -26,8 +26,22 @@ const LAYOUT = {
   chars: { left: 46, top: 552, width: 210, pitch: 152,
            bigSize: 66, bigAloneSize: 50, smallSize: 40, noteSize: 22,
            divW: 172, divH: 3, divGap: 12 },
-  product: { left: 312, top: 208, width: 560, height: 920 },          // когда есть характеристики (справа)
-  productCentered: { left: 150, top: 300, width: 600, height: 840 },  // когда характеристик нет (по центру)
+  // сейф-зоны: товар считается динамически, чтобы НЕ залезать на шапку/колонку характеристик
+  safe: {
+    gapBelowHeader: 28,   // отступ верха товара от низа шапки (заголовок+подзаг+бейдж)
+    leftColRight: 260,    // правый край колонки характеристик (оранж.квадрат/полоски)
+    gapFromChars: 40,     // отступ товара от колонки характеристик
+    centeredMaxW: 660,    // макс. ширина товара по центру (когда характеристик нет)
+    sideMargin: 40, bottomMargin: 40,
+  },
+};
+
+// уровни свечения вокруг товара (0 — нет … 3 — сильное). Авто-выбор по яркости товара.
+const GLOW = {
+  0: 'none',
+  1: 'drop-shadow(0 0 8px rgba(255,255,255,.40))',
+  2: 'drop-shadow(0 0 12px rgba(255,255,255,.62)) drop-shadow(0 0 22px rgba(255,255,255,.40))',
+  3: 'drop-shadow(0 0 14px rgba(255,255,255,.85)) drop-shadow(0 0 30px rgba(255,255,255,.55))',
 };
 
 function b64(file) { return fs.readFileSync(file).toString('base64'); }
@@ -53,13 +67,27 @@ function getBrowser() {
   return browserPromise;
 }
 
-function buildHtml({ bgB64, productB64, title, badge, mainChar, chars, offsets }) {
+function buildHtml({ bgB64, productB64, title, badge, mainChar, chars, offsets, glow }) {
   const L = LAYOUT;
   const o = (k) => (offsets && offsets[k]) || { x: 0, y: 0 };  // смещение элемента
   const g = o('group');                                        // смещение всей группы (оранж + хар-ки)
   const hasChars = !!(mainChar || (chars && chars.length));    // есть ли вообще характеристики
-  const pz = hasChars ? L.product : L.productCentered;         // нет характеристик → товар по центру
   const op = o('product');
+  const gl = GLOW[glow] != null ? GLOW[glow] : GLOW[2];        // сила свечения
+
+  // ── СЕЙФ-ЗОНА ТОВАРА: строго ниже шапки (заголовок+подзаг+бейдж) и правее колонки ──
+  const S = L.safe;
+  const bigBottom = L.title.top + L.title.bigSize;                                             // низ большого слова
+  const subBottom = title.sub ? L.title.subTop + L.title.subSize : 0;                          // низ подзаголовка
+  const badgeBottom = badge ? L.badge.top + L.badge.size + 2 * L.badge.padY + 2 * L.badge.border + 6 : 0; // низ бейджа
+  const headerBottom = Math.max(bigBottom, subBottom, badgeBottom);                            // низ всей шапки
+  const pTop = headerBottom + S.gapBelowHeader;
+  const pBottom = L.H - S.bottomMargin;
+  let pLeft, pRight;
+  if (hasChars) { pLeft = S.leftColRight + S.gapFromChars; pRight = L.W - S.sideMargin; }       // справа от колонки
+  else { const cw = Math.min(S.centeredMaxW, L.W - 2 * S.sideMargin); pLeft = (L.W - cw) / 2; pRight = pLeft + cw; } // по центру
+  const pz = { left: pLeft, top: pTop, width: pRight - pLeft, height: pBottom - pTop };
+
   const fontsCss =
     fontFace(800, 'montserrat-latin-800-normal.woff2', RANGE_LATIN) +
     fontFace(800, 'montserrat-cyrillic-800-normal.woff2', RANGE_CYR);
@@ -123,8 +151,7 @@ function buildHtml({ bgB64, productB64, title, badge, mainChar, chars, offsets }
     .note{text-transform:none;opacity:.95}
     .divider{background:${L.colors.white};opacity:.9;border-radius:2px}
     .product{position:absolute;display:flex;align-items:center;justify-content:center}
-    .product img{max-width:100%;max-height:100%;object-fit:contain;
-       filter:drop-shadow(0 0 14px rgba(255,255,255,.85)) drop-shadow(0 0 30px rgba(255,255,255,.55));}
+    .product img{max-width:100%;max-height:100%;object-fit:contain}
   </style></head><body>
     <div class="card">
       <img class="bg" src="data:image/png;base64,${bgB64}">
@@ -132,7 +159,7 @@ function buildHtml({ bgB64, productB64, title, badge, mainChar, chars, offsets }
       ${badgeHtml}
       ${squareHtml}
       ${charsHtml}
-      <div class="product" style="left:${pz.left + op.x}px;top:${pz.top + op.y}px;width:${pz.width}px;height:${pz.height}px"><img src="data:image/png;base64,${productB64}"></div>
+      <div class="product" style="left:${pz.left + op.x}px;top:${pz.top + op.y}px;width:${pz.width}px;height:${pz.height}px"><img src="data:image/png;base64,${productB64}" style="filter:${gl}"></div>
     </div>
   </body></html>`;
 }
@@ -161,10 +188,11 @@ const FIT_SCRIPT = () => {
  * @param {Object<string,{x:number,y:number}>} [o.offsets] смещения элементов (title/badge/square/group/product/char0..)
  * @param {string} o.outPath
  */
-export async function renderCard({ bgPath, productPath, title, badge, mainChar, chars, offsets, outPath }) {
+export async function renderCard({ bgPath, productPath, title, badge, mainChar, chars, offsets, glow, outPath }) {
   const html = buildHtml({
     bgB64: b64(bgPath), productB64: b64(productPath),
     title, badge: badge || null, mainChar: mainChar || null, chars: chars || [], offsets: offsets || {},
+    glow: glow == null ? 2 : glow,
   });
   const browser = await getBrowser();
   const page = await browser.newPage();
