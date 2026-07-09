@@ -67,13 +67,14 @@ function getBrowser() {
   return browserPromise;
 }
 
-function buildHtml({ bgB64, productB64, title, badge, mainChar, chars, offsets, glow }) {
+function buildHtml({ bgB64, productB64, title, badge, mainChar, chars, offsets, glow, productScale }) {
   const L = LAYOUT;
   const o = (k) => (offsets && offsets[k]) || { x: 0, y: 0 };  // смещение элемента
   const g = o('group');                                        // смещение всей группы (оранж + хар-ки)
   const hasChars = !!(mainChar || (chars && chars.length));    // есть ли вообще характеристики
   const op = o('product');
   const gl = GLOW[glow] != null ? GLOW[glow] : GLOW[2];        // сила свечения
+  const ps = productScale || 1;                                // масштаб товара
 
   // ── СЕЙФ-ЗОНА ТОВАРА: строго ниже шапки (заголовок+подзаг+бейдж) и правее колонки ──
   const S = L.safe;
@@ -159,7 +160,7 @@ function buildHtml({ bgB64, productB64, title, badge, mainChar, chars, offsets, 
       ${badgeHtml}
       ${squareHtml}
       ${charsHtml}
-      <div class="product" style="left:${pz.left + op.x}px;top:${pz.top + op.y}px;width:${pz.width}px;height:${pz.height}px"><img src="data:image/png;base64,${productB64}" style="filter:${gl}"></div>
+      <div class="product" style="left:${pz.left + op.x}px;top:${pz.top + op.y}px;width:${pz.width}px;height:${pz.height}px"><img src="data:image/png;base64,${productB64}" style="filter:${gl};transform:scale(${ps})"></div>
     </div>
   </body></html>`;
 }
@@ -188,11 +189,11 @@ const FIT_SCRIPT = () => {
  * @param {Object<string,{x:number,y:number}>} [o.offsets] смещения элементов (title/badge/square/group/product/char0..)
  * @param {string} o.outPath
  */
-export async function renderCard({ bgPath, productPath, title, badge, mainChar, chars, offsets, glow, outPath }) {
+export async function renderCard({ bgPath, productPath, title, badge, mainChar, chars, offsets, glow, productScale, outPath }) {
   const html = buildHtml({
     bgB64: b64(bgPath), productB64: b64(productPath),
     title, badge: badge || null, mainChar: mainChar || null, chars: chars || [], offsets: offsets || {},
-    glow: glow == null ? 2 : glow,
+    glow: glow == null ? 2 : glow, productScale: productScale || 1,
   });
   const browser = await getBrowser();
   const page = await browser.newPage();

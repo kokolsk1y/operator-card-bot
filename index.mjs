@@ -29,7 +29,7 @@ const bot = new Bot(TOKEN);
 const S = new Map();
 const STEP = { NAME: 'name', BADGE: 'badge', PHOTO: 'photo', CHAR: 'char' };
 const newSession = () => ({ step: null, title: null, badge: null, cutout: '', cutStatus: null, cutPromise: null,
-  cutLightness: null, glow: 'auto', chars: [], idx: 0, editing: null,
+  cutLightness: null, glow: 'auto', productScale: 1, chars: [], idx: 0, editing: null,
   offsets: {}, adjTargets: [], adjIdx: 0, adjStep: 10 });
 const STEPS = [5, 10, 20];
 
@@ -130,19 +130,22 @@ function adjustKb(s) {
     .text('⬆️ Выше', 'a_up').text('⬇️ Ниже', 'a_dn').row()
     .text('⬅️ Левее', 'a_lf').text('➡️ Правее', 'a_rt').row()
     .text('◀', 'a_prev').text(t.label, 'a_noop').text('▶', 'a_next').row()
+    .text('🔍➖ Фото', 'a_smaller').text('🔍➕ Фото', 'a_bigger').row()
     .text(`Шаг: ${s.adjStep}px`, 'a_step').text('✅ Готово', 'a_done');
 }
 function adjCaption(s) {
   const t = s.adjTargets[s.adjIdx]; const o = off(s, t.id);
   return `📐 Двигаю: *${t.label}*\nсмещение  x:${o.x}  y:${o.y}  ·  шаг ${s.adjStep}px\n` +
-    `◀ ▶ — выбрать элемент, стрелки — двигать.`;
+    `🔍 Масштаб фото: ${Math.round(s.productScale * 100)}%\n` +
+    `◀ ▶ — выбрать элемент, стрелки — двигать, 🔍 — размер фото.`;
 }
 // рендер — в ОТДЕЛЬНОМ процессе (render-worker.mjs). Падение рендера не убьёт бота.
 function renderToFile(s, out) {
   return new Promise((resolve, reject) => {
     const job = {
       bgPath: BG, productPath: s.cutout, title: s.title, badge: s.badge,
-      mainChar: s.chars[0] || null, chars: stripsOf(s), offsets: s.offsets, glow: resolveGlow(s), outPath: out,
+      mainChar: s.chars[0] || null, chars: stripsOf(s), offsets: s.offsets,
+    glow: resolveGlow(s), productScale: s.productScale, outPath: out,
     };
     try { if (fs.existsSync(out)) fs.unlinkSync(out); } catch {}   // убрать старую карточку
     const jobPath = out.replace(/\.png$/, '') + '.job.json';
@@ -359,10 +362,14 @@ bot.on('callback_query:data', async (ctx) => {
     if (d === 'a_step') s.adjStep = STEPS[(STEPS.indexOf(s.adjStep) + 1) % STEPS.length];
     return ctx.editMessageCaption({ caption: adjCaption(s), parse_mode: 'Markdown', reply_markup: adjustKb(s) });
   }
-  if (['a_up', 'a_dn', 'a_lf', 'a_rt'].includes(d)) {
-    const o = off(s, s.adjTargets[s.adjIdx].id); const st = s.adjStep;
-    if (d === 'a_up') o.y -= st; if (d === 'a_dn') o.y += st;
-    if (d === 'a_lf') o.x -= st; if (d === 'a_rt') o.x += st;
+  if (['a_up', 'a_dn', 'a_lf', 'a_rt', 'a_bigger', 'a_smaller'].includes(d)) {
+    if (d === 'a_bigger') s.productScale = Math.min(2, +(s.productScale + 0.1).toFixed(2));
+    else if (d === 'a_smaller') s.productScale = Math.max(0.5, +(s.productScale - 0.1).toFixed(2));
+    else {
+      const o = off(s, s.adjTargets[s.adjIdx].id); const st = s.adjStep;
+      if (d === 'a_up') o.y -= st; if (d === 'a_dn') o.y += st;
+      if (d === 'a_lf') o.x -= st; if (d === 'a_rt') o.x += st;
+    }
     const out = path.join(TMP, `adj_${ctx.chat.id}.png`);
     await renderToFile(s, out);
     return ctx.editMessageMedia(
