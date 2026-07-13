@@ -10,3 +10,7 @@ node_modules/
 без фона/
 готовые карточки/
 обрезка 3-4/
+
+# python cache
+__pycache__/
+*.pyc
