@@ -1,0 +1,18 @@
+# Скрипты и текст — всегда LF (иначе на Linux «bad interpreter» и т.п.)
+* text=auto eol=lf
+*.sh   text eol=lf
+*.py   text eol=lf
+*.mjs  text eol=lf
+*.js   text eol=lf
+*.json text eol=lf
+*.yml  text eol=lf
+*.md   text eol=lf
+Dockerfile text eol=lf
+.env.example text eol=lf
+
+# Бинарники — не трогать
+*.png  binary
+*.jpg  binary
+*.webp binary
+*.woff2 binary
+*.onnx binary
