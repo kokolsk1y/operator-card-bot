@@ -18,8 +18,9 @@ const TMP = path.join(__dirname, '.tmp');                  // внутренне
 const DIR_UP = path.join(__dirname, 'загруженные фото');   // что прислал оператор
 const DIR_CUT = path.join(__dirname, 'без фона');          // вырезанный товар
 const DIR_CARD = path.join(__dirname, 'готовые карточки'); // итоговые карточки
+const DIR_CROP = path.join(__dirname, 'обрезка 3-4');      // фото, обрезанные под 3:4
 const LIMIT = cfg.limits.charsPerLine;
-[TMP, DIR_UP, DIR_CUT, DIR_CARD].forEach((d) => fs.mkdirSync(d, { recursive: true }));
+[TMP, DIR_UP, DIR_CUT, DIR_CARD, DIR_CROP].forEach((d) => fs.mkdirSync(d, { recursive: true }));
 const pad2 = (n) => String(n).padStart(2, '0');
 const stamp = () => { const d = new Date(); return `${pad2(d.getHours())}${pad2(d.getMinutes())}${pad2(d.getSeconds())}`; };
 
@@ -27,7 +28,7 @@ const bot = new Bot(TOKEN);
 
 // ── состояние диалога ───────────────────────────────────────────────────────
 const S = new Map();
-const STEP = { NAME: 'name', BADGE: 'badge', PHOTO: 'photo', CHAR: 'char' };
+const STEP = { NAME: 'name', BADGE: 'badge', PHOTO: 'photo', CHAR: 'char', CROP: 'crop' };
 const newSession = () => ({ step: null, title: null, badge: null, cutout: '', cutStatus: null, cutPromise: null,
   cutLightness: null, glow: 'auto', productScale: 1, chars: [], idx: 0, editing: null,
   offsets: {}, adjTargets: [], adjIdx: 0, adjStep: 10 });
@@ -188,6 +189,40 @@ function runCutout(input, output) {
     });
   });
 }
+// обрезка фото под 3:4 (crop34.py)
+function runCrop(input, output) {
+  return new Promise((resolve) => {
+    const py = spawn(PYTHON, [path.join(__dirname, 'crop34.py'), input, output]);
+    let out = '';
+    py.stdout.on('data', (d) => (out += d));
+    py.on('close', () => {
+      const line = out.trim().split('\n').filter(Boolean).pop() || '{}';
+      try { resolve(JSON.parse(line)); } catch { resolve({ status: 'fail' }); }
+    });
+  });
+}
+// режим /обрезка: фото товара на белом -> 3:4
+function enterCrop(ctx) {
+  S.set(ctx.chat.id, newSession());
+  get(ctx.chat.id).step = STEP.CROP;
+  return ctx.reply('✂️ Режим *обрезки 3:4*.\nПришли фото товара на белом фоне — верну его в формате 3:4 ' +
+    '(обрежу лишний фон, товар по центру, само фото не меняю). Можно несколько подряд.\nВыйти — /new.',
+    { parse_mode: 'Markdown' });
+}
+async function handleCrop(ctx, s) {
+  const proc = await ctx.reply('⏳ Делаю 3:4…');
+  const del = () => ctx.api.deleteMessage(ctx.chat.id, proc.message_id).catch(() => {});
+  let src;
+  try { src = await downloadPhoto(ctx, path.join(DIR_UP, `crop_${ctx.chat.id}`)); }
+  catch { await del(); return ctx.reply('Не смог скачать фото, пришли ещё раз.'); }
+  const out = path.join(DIR_CROP, `${ctx.chat.id}_${stamp()}.png`);
+  const r = await runCrop(src, out);
+  await del();
+  if (r.status !== 'ok' || !fs.existsSync(out)) return ctx.reply('⚠️ Не получилось. Пришли фото товара на светлом фоне.');
+  await ctx.replyWithDocument(new InputFile(out, '3x4.png'), {
+    caption: `✅ Готово — ${r.w}×${r.h} (3:4). Пришли ещё фото или /new.`,
+  });
+}
 
 async function buildCard(ctx, s) {
   // дождаться фоновой вырезки фона, если ещё идёт
@@ -244,11 +279,13 @@ async function startNew(ctx, showExample) {
 bot.command('start', (ctx) => startNew(ctx, true));   // /start — с примером
 bot.command('new', (ctx) => startNew(ctx, false));    // /new — без примера
 bot.command('help', (ctx) => ctx.reply(HELP, { parse_mode: 'Markdown' }).catch(() => ctx.reply(HELP.replace(/[*`_]/g, ''))));
+bot.command('crop', (ctx) => enterCrop(ctx));          // /crop — режим обрезки 3:4
 
 // ── текст ────────────────────────────────────────────────────────────────────
 bot.on('message:text', async (ctx) => {
   const s = get(ctx.chat.id);
   const text = ctx.message.text.trim();
+  if (/^\/(обрезка|crop)\b/i.test(text)) return enterCrop(ctx);   // кириллическая команда /обрезка
   if (text.startsWith('/')) return;
 
   if (s.step === STEP.NAME) {
@@ -314,12 +351,14 @@ async function handleProductImage(ctx, s) {
   await ctx.reply('📸 Фото получил! Убираю фон в фоне 🪄 — а ты пока заполняй характеристики 👇');
   return askChar(ctx, s);
 }
-bot.on('message:photo', (ctx) => handleProductImage(ctx, get(ctx.chat.id)));
+// маршрут картинки: режим обрезки → 3:4, иначе → карточка
+const onImage = (ctx, s) => (s.step === STEP.CROP ? handleCrop(ctx, s) : handleProductImage(ctx, s));
+bot.on('message:photo', (ctx) => onImage(ctx, get(ctx.chat.id)));
 bot.on('message:document', (ctx) => {
   const s = get(ctx.chat.id);
   const mime = ctx.message.document.mime_type || '';
   if (!mime.startsWith('image/')) return ctx.reply('Это не картинка 🙂 Пришли фото товара (как фото или как файл-изображение: png/jpg/webp).');
-  return handleProductImage(ctx, s);
+  return onImage(ctx, s);
 });
 
 // ── кнопки ──────────────────────────────────────────────────────────────────
@@ -389,6 +428,7 @@ process.on('uncaughtException', (e) => console.error('uncaughtException:', e?.me
 bot.start({ onStart: async (i) => {
   await bot.api.setMyCommands([
     { command: 'new', description: '🆕 Новая карточка' },
+    { command: 'crop', description: '✂️ Обрезать фото 3:4' },
     { command: 'help', description: '🆘 Как пользоваться' },
     { command: 'start', description: '▶️ Старт + пример' },
   ]).catch(() => {});
