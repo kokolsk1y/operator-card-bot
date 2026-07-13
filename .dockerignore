@@ -2,9 +2,11 @@ node_modules
 .git
 .tmp
 config.json
+.env
 backups
 start.bat
 test-render.mjs
 загруженные фото
 без фона
 готовые карточки
+обрезка 3-4
