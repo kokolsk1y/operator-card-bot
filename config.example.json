@@ -2,5 +2,6 @@
   "botToken": "ВСТАВЬ_СЮДА_ТОКЕН_ОТ_BOTFATHER",
   "model": "birefnet-general",
   "card": { "width": 900, "height": 1200, "scale": 2 },
-  "limits": { "charsPerLine": 20 }
+  "limits": { "charsPerLine": 20 },
+  "concurrency": { "cutout": 2, "render": 1 }
 }

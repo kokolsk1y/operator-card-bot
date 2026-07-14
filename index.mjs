@@ -140,9 +140,24 @@ function adjCaption(s) {
     `🔍 Масштаб фото: ${Math.round(s.productScale * 100)}%\n` +
     `◀ ▶ — выбрать элемент, стрелки — двигать, 🔍 — размер фото.`;
 }
+// ── ограничитель одновременных тяжёлых операций (чтобы не съесть всю память) ──
+function makeLimiter(max) {
+  let active = 0; const q = [];
+  const next = () => {
+    if (active >= max || !q.length) return;
+    active++; const { fn, res, rej } = q.shift();
+    Promise.resolve().then(fn).then(res, rej).finally(() => { active--; next(); });
+  };
+  return (fn) => new Promise((res, rej) => { q.push({ fn, res, rej }); next(); });
+}
+const CUT_MAX = cfg.concurrency?.cutout ?? 2;      // не более N вырезок фона разом (birefnet прожорлив)
+const RENDER_MAX = cfg.concurrency?.render ?? 1;   // рендеров одновременно
+const cutLimit = makeLimiter(CUT_MAX);
+const renderLimit = makeLimiter(RENDER_MAX);
+
 // рендер — в ОТДЕЛЬНОМ процессе (render-worker.mjs). Падение рендера не убьёт бота.
 function renderToFile(s, out) {
-  return new Promise((resolve, reject) => {
+  return renderLimit(() => new Promise((resolve, reject) => {
     const job = {
       bgPath: BG, productPath: s.cutout, title: s.title, badge: s.badge,
       mainChar: s.chars[0] || null, chars: stripsOf(s), offsets: s.offsets,
@@ -161,7 +176,7 @@ function renderToFile(s, out) {
       if (fs.existsSync(out)) resolve(out);
       else reject(new Error('рендер не удался' + (err ? ': ' + err.slice(0, 300) : '')));
     });
-  });
+  }));
 }
 
 // ── утилиты ──────────────────────────────────────────────────────────────────
@@ -179,7 +194,7 @@ async function downloadPhoto(ctx, destNoExt) {
   return dest;
 }
 function runCutout(input, output) {
-  return new Promise((resolve) => {
+  return cutLimit(() => new Promise((resolve) => {
     const py = spawn(PYTHON, [path.join(__dirname, 'cutout.py'), input, output, cfg.model]);
     let out = '';
     py.stdout.on('data', (d) => (out += d));
@@ -187,7 +202,7 @@ function runCutout(input, output) {
       const line = out.trim().split('\n').filter(Boolean).pop() || '{}';
       try { resolve(JSON.parse(line)); } catch { resolve({ status: 'fail', message: 'не удалось обработать фото' }); }
     });
-  });
+  }));
 }
 // обрезка фото под 3:4 (crop34.py)
 function runCrop(input, output) {
