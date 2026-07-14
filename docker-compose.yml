@@ -8,6 +8,8 @@ services:
     restart: unless-stopped          # авто-перезапуск + старт при перезагрузке сервера
     environment:
       - BOT_TOKEN=${BOT_TOKEN}
+    extra_hosts:                      # обход DNS-блокировки Telegram в РФ (реальный IP api.telegram.org)
+      - "api.telegram.org:149.154.167.220"
 # Примечание: готовые карточки бот отправляет оператору в Telegram.
 # Файлы внутри контейнера — временные (не критичны). Если позже нужен архив
 # на сервере — добавим том с ASCII-именем, скажи.
