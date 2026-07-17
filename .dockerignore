@@ -1,6 +1,9 @@
 node_modules
+**/node_modules
 .git
 .tmp
+prices/.probe
+prices/data
 config.json
 .env
 backups

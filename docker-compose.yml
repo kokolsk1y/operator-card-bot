@@ -10,6 +10,34 @@ services:
       - BOT_TOKEN=${BOT_TOKEN}
     extra_hosts:                      # обход DNS-блокировки Telegram в РФ (реальный IP api.telegram.org)
       - "api.telegram.org:149.154.167.220"
+  # ── Мониторинг цен на маркетплейсах. Отдельный сервис и отдельный бот. ──
+  # Живёт рядом, но независимо: свой лёгкий образ (~150 МБ против 6 ГБ),
+  # своя память, свой рестарт. Правка парсера не трогает генератор карточек,
+  # а OOM от birefnet не уносит мониторинг.
+  prices:
+    build:
+      context: .
+      dockerfile: Dockerfile.prices
+    image: price-monitor
+    restart: unless-stopped
+    environment:
+      - PRICES_BOT_TOKEN=${PRICES_BOT_TOKEN}      # ОТДЕЛЬНЫЙ токен, не BOT_TOKEN
+      - PRICES_ALLOWED_USERS=${PRICES_ALLOWED_USERS}  # без него не стартует: бот знает закупочные цены
+      - PRICES_DB_PATH=/app/data/prices.db
+      - PRICES_CHECK_EVERY_MIN=${PRICES_CHECK_EVERY_MIN:-20}
+      - PRICES_SEARCH_EVERY_HOURS=${PRICES_SEARCH_EVERY_HOURS:-24}
+      - PRICES_OZON_ENABLED=${PRICES_OZON_ENABLED:-0}  # 1 только после probe-ozon.mjs
+    extra_hosts:                      # тот же DNS-блок Telegram в РФ, что и у бота карточек
+      - "api.telegram.org:149.154.167.220"
+    volumes:
+      - prices-data:/app/data         # БД цен. Без тома умрёт при первой пересборке.
+    mem_limit: 512m                   # на сервере 8 ГБ, и birefnet у соседа прожорлив
+
+# ИМЕНОВАННЫЙ том, а не bind-mount на папку: путь к проекту содержит кириллицу
+# («для операторов бот»), и docker на таких путях ведёт себя непредсказуемо.
+volumes:
+  prices-data:
+
 # Примечание: готовые карточки бот отправляет оператору в Telegram.
 # Файлы внутри контейнера — временные (не критичны). Если позже нужен архив
 # на сервере — добавим том с ASCII-именем, скажи.
