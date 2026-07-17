@@ -51,6 +51,10 @@ function toProduct(p) {
     rating: p.reviewRating ?? p.rating ?? null,
     feedbacks: p.nmFeedbacks ?? p.feedbacks ?? null,
     url: `https://www.wildberries.ru/catalog/${p.id}/detail.aspx`,
+    // Розничная витрина про НДС не знает ничего — и врать не будем.
+    // null трактуется как «вычета нет», то есть в сторону осторожности.
+    vatReturnable: null,
+    vatRate: null,
     ...readPrice(p),
   };
 }
@@ -102,3 +106,12 @@ function* chunks(arr, n) {
 /** Копейки → «63.00 ₽» для показа человеку. */
 export const rub = (kop) =>
   kop == null ? '—' : `${(kop / 100).toFixed(2)} ₽`;
+
+/** Интерфейс площадки для конвейера — см. marketplaces.mjs. */
+export const adapter = {
+  id: 'wb',
+  title: 'Wildberries',
+  enabled: () => true, // проверено вживую 2026-07-16
+  search: searchProducts,
+  prices: fetchPrices,
+};
