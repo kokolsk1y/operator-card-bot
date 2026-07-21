@@ -1,0 +1,28 @@
+# Оверлей: сервис поиска цен. Подключается ВМЕСТЕ с основным docker-compose.yml,
+# не меняя его:
+#   docker compose -f docker-compose.yml -f docker-compose.prices.yml up -d --build prices
+#
+# Так бот карточек (сервис bot в основном файле) вообще не трогается: его
+# определение остаётся как есть, а мы лишь добавляем рядом второй сервис.
+# Нужно из-за того, что на сервере docker-compose.yml правился руками и
+# история репозитория разошлась — сливать нельзя.
+services:
+  prices:
+    build:
+      context: .
+      dockerfile: Dockerfile.prices
+    image: price-monitor
+    restart: unless-stopped
+    environment:
+      - PRICES_BOT_TOKEN=${PRICES_BOT_TOKEN}
+      - PRICES_ALLOWED_USERS=${PRICES_ALLOWED_USERS:-}
+      - PRICES_DB_PATH=/app/data/prices.db
+      - PRICES_OZON_ENABLED=${PRICES_OZON_ENABLED:-0}
+    extra_hosts:                      # тот же обход DNS-блока Telegram в РФ
+      - "api.telegram.org:149.154.167.220"
+    volumes:
+      - prices-data:/app/data         # БД на томе — переживает пересборку
+    mem_limit: 512m
+
+volumes:
+  prices-data:
