@@ -17,12 +17,18 @@ const MP = { wb: 'WB', ozon: 'OZ' };
 function resultLine({ offer, match, deal }) {
   const flag = deal.worthIt ? '🔥' : '▫️';
   const mp = MP[offer.marketplace] || offer.marketplace;
-  const unit = rub0(deal.unitKop);
-  const pack = match.pack > 1 ? ` <i>(лот ${match.pack})</i>` : '';
   const seller = offer.supplier ? ` · ${esc(offer.supplier.slice(0, 22))}` : '';
   const title = esc(offer.name.slice(0, 46));
-  // Ссылку вешаем на цену — компактно и кликабельно.
-  return `${flag} <a href="${esc(offer.url)}"><b>${unit}/шт</b></a> · ${mp}${pack}\n` +
+
+  // Крупно — цена ЛОТА (ровно то, что покажет страница по ссылке), чтобы при
+  // клике цифра совпадала. Для связок рядом даём расчёт за штуку, по которому
+  // бот и сравнивает с нашей закупочной.
+  const lot = rub0(offer.priceKop);
+  const priceStr = match.pack > 1
+    ? `<b>${lot}</b> за ${match.pack} шт = ${rub0(deal.unitKop)}/шт`
+    : `<b>${lot}</b>`;
+
+  return `${flag} <a href="${esc(offer.url)}">${priceStr}</a> · ${mp}\n` +
          `   ${title}${seller}`;
 }
 
