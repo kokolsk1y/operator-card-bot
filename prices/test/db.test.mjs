@@ -1,108 +1,53 @@
-// Проверка хранилища: полный путь товара от заведения до истории цен.
-// Запуск: node --test prices/test/db.test.mjs
-
+// Хранилище: разовая модель, одна таблица products.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import {
-  openDb, addOurProduct, listOurProducts, upsertCandidate, pendingCandidates,
-  confirmCandidate, rejectCandidate, activeWatched, recordPrice, priceHistory,
-} from '../src/db.mjs';
+import { openDb, addProduct, listProducts, getProduct, deleteProduct, recordCheck } from '../src/db.mjs';
 
-const OWNER = 111;
+const ME = 1, OTHER = 2;
+const sample = (over = {}) => ({
+  name: 'Лампа LED A60 E27 3000K 11Вт IEK', article: 'LLE-A60', brand: 'IEK',
+  priceKop: 3000, priceHasVat: false, vatRate: null, ownerId: ME, ...over,
+});
 
-function seed() {
+test('добавление и чтение товара', () => {
   const db = openDb(':memory:');
-  const id = addOurProduct(db, {
-    name: 'Лампа LED A60 E27 3000K 11Вт 990Lm IEK',
-    article: 'LLE-A60-11-230-30-E27',
-    brand: 'IEK',
-    priceKop: 3000,
-    ownerId: OWNER,
-  });
-  return { db, id };
-}
-
-const cand = (ourProductId, over = {}) => ({
-  ourProductId, marketplace: 'wb', externalId: '231056588',
-  name: 'Лампа светодиодная A60 груша 11Вт 230В 3000К E27 2шт',
-  brand: 'Iek', supplier: 'Склад Электрика', pack: 2, priceKop: 39000,
-  confidence: 1, reason: 'совпали: socket, shape, power, cct', ...over,
+  const id = addProduct(db, sample());
+  const p = getProduct(db, id, ME);
+  assert.equal(p.name, 'Лампа LED A60 E27 3000K 11Вт IEK');
+  assert.equal(p.price_kop, 3000);
+  assert.equal(p.price_has_vat, 0);
 });
 
-test('товар заводится и читается своим владельцем', () => {
-  const { db, id } = seed();
-  const list = listOurProducts(db, OWNER);
-  assert.equal(list.length, 1);
-  assert.equal(list[0].id, id);
-  assert.equal(list[0].price_kop, 3000);
-  // Чужой пользователь чужого товара не видит.
-  assert.equal(listOurProducts(db, 999).length, 0);
+test('список — только свои товары', () => {
+  const db = openDb(':memory:');
+  addProduct(db, sample());
+  addProduct(db, sample({ name: 'Розетка', ownerId: OTHER }));
+  assert.equal(listProducts(db, ME).length, 1);
+  assert.equal(listProducts(db, OTHER).length, 1);
 });
 
-test('повторная находка не плодит дублей, а обновляет цену', () => {
-  const { db, id } = seed();
-  upsertCandidate(db, cand(id));
-  upsertCandidate(db, cand(id, { priceKop: 35000 }));
-  const p = pendingCandidates(db, id);
-  assert.equal(p.length, 1);
-  assert.equal(p[0].price_kop, 35000);
+test('чужой товар не отдаётся по id', () => {
+  const db = openDb(':memory:');
+  const id = addProduct(db, sample());
+  assert.ok(getProduct(db, id, ME));
+  assert.equal(getProduct(db, id, OTHER), undefined);
 });
 
-test('подтверждение переводит кандидата в отслеживание', () => {
-  const { db, id } = seed();
-  upsertCandidate(db, cand(id));
-  const c = pendingCandidates(db, id)[0];
-
-  confirmCandidate(db, c.id, OWNER);
-
-  assert.equal(pendingCandidates(db, id).length, 0, 'кандидат должен уйти из ожидания');
-  const w = activeWatched(db, 'wb');
-  assert.equal(w.length, 1);
-  assert.equal(w[0].external_id, '231056588');
-  assert.equal(w[0].pack, 2, 'количество в лоте обязано доехать до отслеживания');
+test('чужой товар нельзя удалить', () => {
+  const db = openDb(':memory:');
+  const id = addProduct(db, sample());
+  assert.equal(deleteProduct(db, id, OTHER), false);
+  assert.ok(getProduct(db, id, ME), 'товар должен уцелеть');
+  assert.equal(deleteProduct(db, id, ME), true);
+  assert.equal(getProduct(db, id, ME), undefined);
 });
 
-test('отклонённый кандидат не попадает в отслеживание', () => {
-  const { db, id } = seed();
-  upsertCandidate(db, cand(id));
-  rejectCandidate(db, pendingCandidates(db, id)[0].id);
-  assert.equal(pendingCandidates(db, id).length, 0);
-  assert.equal(activeWatched(db).length, 0);
-});
-
-test('история пишется только при изменении цены', () => {
-  const { db, id } = seed();
-  upsertCandidate(db, cand(id));
-  confirmCandidate(db, pendingCandidates(db, id)[0].id, OWNER);
-  const w = activeWatched(db)[0];
-
-  const first = recordPrice(db, w.id, { priceKop: 39000, stock: 53, pack: 2 });
-  assert.equal(first.changed, true, 'первый замер — всегда изменение');
-
-  // Три проверки подряд с той же ценой не должны раздувать историю.
-  recordPrice(db, w.id, { priceKop: 39000, stock: 53, pack: 2 });
-  recordPrice(db, w.id, { priceKop: 39000, stock: 50, pack: 2 });
-  assert.equal(priceHistory(db, w.id).length, 1);
-
-  const drop = recordPrice(db, w.id, { priceKop: 5000, stock: 50, pack: 2 });
-  assert.equal(drop.changed, true);
-  assert.equal(drop.prevKop, 39000);
-
-  const h = priceHistory(db, w.id);
-  assert.equal(h.length, 2);
-  // Цена за штуку = цена лота / количество. 50 руб за 2 шт → 25 руб/шт.
-  assert.equal(h[0].unit_price_kop, 2500);
-});
-
-test('удаление товара уносит за собой кандидатов и историю', () => {
-  const { db, id } = seed();
-  upsertCandidate(db, cand(id));
-  confirmCandidate(db, pendingCandidates(db, id)[0].id, OWNER);
-  recordPrice(db, activeWatched(db)[0].id, { priceKop: 39000, stock: 1, pack: 2 });
-
-  db.prepare('DELETE FROM our_products WHERE id = ?').run(id);
-
-  assert.equal(activeWatched(db).length, 0);
-  assert.equal(db.prepare('SELECT COUNT(*) n FROM price_history').get().n, 0,
-    'висячая история цен без товара — мусор в БД');
+test('итог последней проверки сохраняется', () => {
+  const db = openDb(':memory:');
+  const id = addProduct(db, sample());
+  recordCheck(db, id, { found: 30, deals: 2 });
+  const p = getProduct(db, id, ME);
+  assert.equal(p.last_found, 30);
+  assert.equal(p.last_deals, 2);
+  assert.ok(p.last_checked_at);
 });

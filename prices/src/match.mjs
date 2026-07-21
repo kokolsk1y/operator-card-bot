@@ -10,7 +10,7 @@
 // не засчитывать его как подтверждённый.
 
 import { canonArticle } from './normalize.mjs';
-import { extractSpecs, extractPack, HARD_SPECS, SPEC_WEIGHT } from './specs.mjs';
+import { extractSpecs, extractPack, shapeFamily, HARD_SPECS, SPEC_WEIGHT } from './specs.mjs';
 
 /** Порог уверенности, выше которого товар считаем совпавшим. */
 const MATCH_THRESHOLD = 0.7;
@@ -21,6 +21,15 @@ const COMPARE = {
   lumens: (a, b) => Math.abs(a - b) <= Math.max(a, b) * 0.1,
   // 220 В, 230 В и 220-240 В — тоже одно и то же.
   voltage: (a, b) => (inMains(a) && inMains(b)) || a === b,
+  // Форма: оба с числом (A60/A65) → точное равенство. Хоть один словом
+  // («груша») → сверяем семейство. Так «A60» матчится с «грушей», но
+  // не с «свечой», и при этом A60 != A65, когда оба заданы точно.
+  shape: (a, b) => {
+    if (/\d/.test(a) && /\d/.test(b)) return a === b;
+    const fa = shapeFamily(a) ?? a;
+    const fb = shapeFamily(b) ?? b;
+    return fa === fb;
+  },
 };
 const inMains = (v) => v >= 210 && v <= 250;
 

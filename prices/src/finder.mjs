@@ -1,77 +1,80 @@
-// Поиск кандидатов: площадка → отсев → кандидаты в БД.
+// Разовый поиск товара по всем площадкам.
 //
-// Это ДОРОГАЯ и РЕДКАЯ операция. Поиск у маркетплейсов мусорный (WB на запрос
-// про конкретную лампу выдал 100 товаров, где верный был один и стоял 34-м),
-// а лимиты жёсткие (429 на 4-м запросе подряд). Поэтому гоняем раз в сутки
-// и обязательно через matchProduct.
+// Модель простая, как и просил заказчик: заполнил товар → нашли → выдали
+// список дешевле твоей цены. Никакого отслеживания и подтверждений —
+// ручная проверка это клики по ссылкам в выдаче.
+//
+// Находимость держится на мульти-запросе (queries.mjs): один длинный запрос
+// возвращает почти пусто, несколько коротких — десятки совпадений.
 
 import { enabledMarketplaces } from './marketplaces.mjs';
 import { matchProduct } from './match.mjs';
-import { upsertCandidate } from './db.mjs';
+import { buildQueries } from './queries.mjs';
+import { evaluateOffer } from './pricing.mjs';
 
 /**
- * Сколько «под вопросом» показывать сверх точных совпадений.
- * Без ограничения человек утонет: unsure — это «характеристики не указаны»,
- * таких в выдаче много и почти все — мимо.
+ * Ищет предложения для одного товара по всем включённым площадкам.
+ *
+ * @param {{name,article,brand,price_kop,price_has_vat,vat_rate}} product
+ * @returns {Promise<{results:Array, stats:object}>}
+ *   results — отсортированы: сначала выгодные, потом по цене за штуку.
+ *   Каждый элемент: {offer, match, deal}.
  */
-const MAX_UNSURE = 3;
+export async function searchProduct(product) {
+  const ref = { name: product.name, article: product.article, brand: product.brand };
+  const queries = buildQueries(product);
 
-/**
- * Ищет кандидатов для одного нашего товара по всем включённым площадкам.
- * Возвращает то, что стоит показать человеку (в порядке уверенности).
- */
-export async function findCandidatesFor(db, ourProduct) {
-  const ref = {
-    name: ourProduct.name,
-    article: ourProduct.article,
-    brand: ourProduct.brand,
-  };
-
-  const found = [];
+  // id -> {offer, match} — дедуп по товару, оставляем лучшее совпадение.
+  const pool = new Map();
 
   for (const mp of enabledMarketplaces()) {
-    let offers;
-    try {
-      offers = await mp.search(ourProduct.name);
-    } catch (e) {
-      // Одна площадка легла — не роняем остальные.
-      console.error(`поиск на ${mp.id} не удался: ${e.message}`);
-      continue;
-    }
-
-    for (const offer of offers) {
-      const m = matchProduct(ref, offer);
-      if (m.verdict === 'reject') continue;
-      found.push({ offer, m, mp: mp.id });
+    for (const q of queries) {
+      let offers;
+      try {
+        offers = await mp.search(q);
+      } catch (e) {
+        console.error(`${mp.id} «${q}»: ${e.message}`);
+        continue;
+      }
+      for (const offer of offers) {
+        const match = matchProduct(ref, offer);
+        if (match.verdict === 'reject') continue;
+        const key = `${offer.marketplace}:${offer.id}`;
+        const prev = pool.get(key);
+        if (!prev || match.confidence > prev.match.confidence) pool.set(key, { offer, match });
+      }
     }
   }
 
-  found.sort((a, b) => b.m.confidence - a.m.confidence);
-
-  const matches = found.filter((f) => f.m.verdict === 'match');
-  const unsure = found.filter((f) => f.m.verdict === 'unsure').slice(0, MAX_UNSURE);
-  const show = [...matches, ...unsure];
-
-  for (const { offer, m } of show) {
-    upsertCandidate(db, {
-      ourProductId: ourProduct.id,
-      marketplace: offer.marketplace,
-      externalId: offer.id,
-      name: offer.name,
-      brand: offer.brand,
-      supplier: offer.supplier,
-      url: offer.url,
-      pack: m.pack,
-      priceKop: offer.priceKop,
-      confidence: m.confidence,
-      reason: m.reason,
-    });
-  }
-
-  return {
-    shown: show.length,
-    matched: matches.length,
-    unsure: unsure.length,
-    rejected: found.length - show.length,
+  const our = {
+    priceKop: product.price_kop,
+    priceHasVat: !!product.price_has_vat,
+    vatRate: product.vat_rate,
   };
+
+  const results = [...pool.values()].map(({ offer, match }) => {
+    const deal = evaluateOffer(
+      { priceKop: offer.priceKop, pack: match.pack, vatReturnable: offer.vatReturnable, vatRate: offer.vatRate },
+      our,
+    );
+    return { offer, match, deal };
+  });
+
+  // Сортировка: выгодные вперёд, внутри — по цене за штуку, затем по уверенности.
+  results.sort((a, b) => {
+    if (a.deal.worthIt !== b.deal.worthIt) return a.deal.worthIt ? -1 : 1;
+    const ua = a.deal.unitKop ?? Infinity;
+    const ub = b.deal.unitKop ?? Infinity;
+    if (ua !== ub) return ua - ub;
+    return b.match.confidence - a.match.confidence;
+  });
+
+  const stats = {
+    queries: queries.length,
+    found: pool.size,
+    deals: results.filter((r) => r.deal.worthIt).length,
+    matches: results.filter((r) => r.match.verdict === 'match').length,
+  };
+
+  return { results, stats };
 }
