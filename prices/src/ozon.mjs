@@ -1,49 +1,46 @@
-// Адаптер Ozon. ПОКА ВЫКЛЮЧЕН — и это не лень, а следствие трёх неизвестных.
+// Адаптер Ozon Бизнес (витрина для юрлиц — там живёт бейдж «Возврат НДС»).
 //
-// Что установлено экспериментом 2026-07-16 (с IP немецкого датацентра):
-//   - Обычный запрос уходит в редирект-петлю __rr=1,2,3… до обрыва.
-//   - Ответ 403 несёт заголовок «ozon-antibot: 1» и куку abt_data.
-//   - Текст страницы: «Выключите VPN, перезагрузите роутер или подключитесь
-//     к другой сети». То есть режет РЕПУТАЦИЯ IP, а не признаки робота:
-//     Ozon блокирует иностранные и датацентровые адреса.
-//   - curl_cffi с impersonate=chrome и headless-Chrome получают тот же 403 —
-//     маскировка не помогает, потому что дело не в ней.
+// Сетевой слой готов, разбор ответа готов и протестирован (ozon-parse.mjs).
+// Адаптер ВЫКЛЮЧЕН по умолчанию и включается флагом PRICES_OZON_ENABLED=1
+// ТОЛЬКО после успешного probe-ozon.mjs с российского IP — по двум причинам:
 //
-// Что НЕ установлено, и без чего писать разбор ответа — гадание:
-//   1. Пустит ли антибот автоматический клиент с российского IP.
-//      Сервер бота (78.36.202.208, Ростелеком, Калининград) — как раз такой.
-//   2. Виден ли бейдж «Возврат НДС N%» без входа в аккаунт. Он живёт на
-//      витрине ozon.ru/business и на скриншоте снят у залогиненного человека.
-//      Если нужен логин — это отдельное решение: бот пойдёт под закупочным
-//      аккаунтом компании и подставит под бан ЕГО, а не тестовый IP.
-//   3. Структура ответа composer-api. Он отдаёт не список товаров, а набор
-//      виджетов, где данные лежат JSON-строками внутри JSON. Разбирать это
-//      по памяти нельзя — надо смотреть на живой ответ.
+//   1. Ozon режет иностранные/датацентровые IP (ozon-antibot: 1, «выключите
+//      VPN»). С немецкого IP разработки — гарантированный 403. На сервере
+//      (Ростелеком, Калининград) должно открыться — там и проверяем.
+//   2. Виден ли бейдж «Возврат НДС» БЕЗ логина — пока неизвестно. Если нужен
+//      вход, это отдельное решение (бот пойдёт под закупочным аккаунтом).
 //
-// Снять всё три разом: node prices/probe-ozon.mjs с российского IP.
-// Пока probe не пройден, adapter.enabled() = false, и конвейер Озон не трогает.
+// Пока флаг не выставлен — enabled()=false, и конвейер Озон просто не трогает.
+// WB при этом работает.
 
 import { getJson, makeThrottle } from './http.mjs';
+import { extractOffers } from './ozon-parse.mjs';
 
-/** Озон агрессивнее WB — интервал больше. */
-const throttle = makeThrottle(3000);
+// Озон агрессивнее к частоте, чем WB — интервал больше.
+const throttle = makeThrottle(3500);
 
-/**
- * Витрина для юрлиц. Именно здесь живёт бейдж «Возврат НДС», ради которого
- * всё и затевалось: он авторитетно сообщает и ставку, и право на вычет.
- */
-export const BUSINESS_SEARCH = (text) =>
+/** Витрина для юрлиц через composer-api. */
+const businessSearchUrl = (query) =>
   'https://www.ozon.ru/api/composer-api.bx/page/json/v2?url=' +
-  encodeURIComponent(`/business/search/?text=${text}`);
+  encodeURIComponent(`/business/search/?text=${query}&from_global=true`);
 
-export const RETAIL_SEARCH = (text) =>
-  'https://www.ozon.ru/api/composer-api.bx/page/json/v2?url=' +
-  encodeURIComponent(`/search/?text=${text}`);
+export async function searchProducts(query, { limit = 60 } = {}) {
+  const url = businessSearchUrl(query);
+  let json;
+  try {
+    json = await throttle(() => getJson(url, { attempts: 2, timeoutMs: 25000 }));
+  } catch (e) {
+    // 403/редирект-петля = антибот по IP. Наверх — понятной строкой.
+    throw new Error(`Ozon недоступен (${e.message}). Нужен российский IP (probe-ozon.mjs).`);
+  }
+  return extractOffers(json).slice(0, limit);
+}
 
-/**
- * Включается ТОЛЬКО явным разрешением после успешного probe.
- * Переменную ставит человек, убедившийся, что Озон отвечает и разбор написан.
- */
+/** В разовой модели не используется (finder ходит только через search). */
+export async function fetchPrices() {
+  return new Map();
+}
+
 export const adapter = {
   id: 'ozon',
   title: 'Ozon Бизнес',
@@ -51,17 +48,3 @@ export const adapter = {
   search: searchProducts,
   prices: fetchPrices,
 };
-
-export async function searchProducts() {
-  throw new Error(
-    'Адаптер Ozon не готов: не пройден probe-ozon.mjs. ' +
-    'Разбор ответа composer-api пишется по живому ответу, а не по памяти.',
-  );
-}
-
-export async function fetchPrices() {
-  throw new Error('Адаптер Ozon не готов: см. probe-ozon.mjs');
-}
-
-/** Сырой запрос к composer-api — используется диагностикой. */
-export const rawSearch = (url) => throttle(() => getJson(url, { attempts: 1 }));

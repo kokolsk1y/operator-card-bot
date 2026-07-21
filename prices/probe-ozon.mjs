@@ -94,6 +94,20 @@ for (const [label, url] of targets) {
       const vat = r.body.match(/Возврат\s*НДС\s*(\d{1,2})\s*%/i);
       if (vat) line(`🎯 НАЙДЕН БЕЙДЖ «Возврат НДС ${vat[1]}%» — и БЕЗ логина!`);
       else if (/business/i.test(url)) line('⚠️  бейджа «Возврат НДС» в ответе нет — возможно, нужен вход');
+
+      // Прогоняем боевой разборщик по живому ответу composer-api.
+      if (/composer/.test(url)) {
+        try {
+          const { extractOffers } = await import('./src/ozon-parse.mjs');
+          const offers = extractOffers(JSON.parse(r.body));
+          line(`🧩 разборщик извлёк товаров: ${offers.length}`);
+          for (const o of offers.slice(0, 3)) {
+            line(`   • ${(o.name || '—').slice(0, 40)} | ${o.priceKop ? o.priceKop / 100 + '₽' : '—'}` +
+                 `${o.vatReturnable ? ` | НДС ${o.vatRate}%` : ''}`);
+          }
+          if (!offers.length) line('   (0 — структура иная, чем в синтетик-тесте; поправлю по этому файлу)');
+        } catch (e) { line(`   разбор не удался: ${e.message}`); }
+      }
     }
   } catch (e) {
     line(`ошибка: ${e.message}`);

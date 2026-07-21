@@ -22,11 +22,9 @@ services:
     restart: unless-stopped
     environment:
       - PRICES_BOT_TOKEN=${PRICES_BOT_TOKEN}      # ОТДЕЛЬНЫЙ токен, не BOT_TOKEN
-      - PRICES_ALLOWED_USERS=${PRICES_ALLOWED_USERS}  # без него не стартует: бот знает закупочные цены
+      - PRICES_ALLOWED_USERS=${PRICES_ALLOWED_USERS}  # пусто = открыт всем (данные делятся по владельцу)
       - PRICES_DB_PATH=/app/data/prices.db
-      - PRICES_CHECK_EVERY_MIN=${PRICES_CHECK_EVERY_MIN:-20}
-      - PRICES_SEARCH_EVERY_HOURS=${PRICES_SEARCH_EVERY_HOURS:-24}
-      - PRICES_OZON_ENABLED=${PRICES_OZON_ENABLED:-0}  # 1 только после probe-ozon.mjs
+      - PRICES_OZON_ENABLED=${PRICES_OZON_ENABLED:-0}  # 1 только после probe-ozon.mjs на росс. IP
     extra_hosts:                      # тот же DNS-блок Telegram в РФ, что и у бота карточек
       - "api.telegram.org:149.154.167.220"
     volumes:
