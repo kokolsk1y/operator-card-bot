@@ -8,7 +8,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { Bot } from 'grammy';
 import { openDb, listProducts, addProduct } from '../src/db.mjs';
-import { registerHandlers, parsePrice } from '../src/handlers.mjs';
+import { registerHandlers, parsePrice, parseProductBlock } from '../src/handlers.mjs';
 
 const ME = 111, STRANGER = 999;
 
@@ -48,8 +48,9 @@ const textUpdate = (text, from = ME) => ({
     chat: { id: from, type: 'private' },
     from: { id: from, is_bot: false, first_name: 'u' },
     text,
-    entities: text.startsWith('/')
-      ? [{ type: 'bot_command', offset: 0, length: text.split(' ')[0].length }] : undefined,
+    // Длина команды = только «/add», даже если дальше идёт перенос строки.
+    entities: /^\/[A-Za-z_]+/.test(text)
+      ? [{ type: 'bot_command', offset: 0, length: text.match(/^\/[A-Za-z_]+/)[0].length }] : undefined,
   },
 });
 const cbUpdate = (data, from = ME) => ({
@@ -70,6 +71,46 @@ test('парсер цены', () => {
   assert.equal(parsePrice('30,50'), 3050);
   assert.equal(parsePrice('ерунда'), null);
   assert.equal(parsePrice('0'), null);
+});
+
+test('разбор многострочной вставки: название / артикул / цена', () => {
+  const r = parseProductBlock('Лампа LED A60 E27 3000K 11Вт IEK\nLLE-A60-11-230-30-E27\n30');
+  assert.equal(r.name, 'Лампа LED A60 E27 3000K 11Вт IEK');
+  assert.equal(r.article, 'LLE-A60-11-230-30-E27');
+  assert.equal(r.priceKop, 3000);
+});
+
+test('разбор пачки: только название', () => {
+  const r = parseProductBlock('Розетка двойная белая');
+  assert.equal(r.name, 'Розетка двойная белая');
+  assert.equal(r.article, null);
+  assert.equal(r.priceKop, null);
+});
+
+test('разбор пачки: цена с «руб»', () => {
+  assert.equal(parseProductBlock('Лампа\n45 руб').priceKop, 4500);
+});
+
+test('ГЛАВНОЕ: /add с пачкой одним сообщением → сразу поиск', async () => {
+  // Ровно то, что сделал пользователь: всё в одном сообщении с /add.
+  const db = openDb(':memory:');
+  const { bot, searched } = makeBot(db);
+  await bot.handleUpdate(textUpdate('/add\nЛампа LED A60 E27 3000K 11Вт IEK\nLLE-A60-11-230-30-E27\n30'));
+  const saved = listProducts(db, ME);
+  assert.equal(saved.length, 1, 'товар должен завестись из одного сообщения');
+  assert.equal(saved[0].article, 'LLE-A60-11-230-30-E27');
+  assert.equal(saved[0].price_kop, 3000);
+  assert.deepEqual(searched, [saved[0].id], 'должен сразу искать');
+});
+
+test('пачка без цены: спрашивает недостающее', async () => {
+  const db = openDb(':memory:');
+  const { bot, calls, searched } = makeBot(db);
+  await bot.handleUpdate(textUpdate('/add\nЛампа A60 E27 11Вт\nLLE-A60-11'));
+  // Название и артикул есть, цены нет — спросит цену, товар пока не заведён.
+  assert.ok(sent(calls).some((t) => /закупочная цена/i.test(t)));
+  assert.equal(listProducts(db, ME).length, 0);
+  assert.equal(searched.length, 0);
 });
 
 test('ГЛАВНОЕ: обработчик текста не съедает команды', async () => {

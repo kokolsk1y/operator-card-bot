@@ -26,6 +26,35 @@ export function parsePrice(text) {
   return Number.isFinite(v) && v > 0 ? Math.round(v * 100) : null;
 }
 
+/** Строка целиком — это цена? «30», «30.50», «30 руб», «цена 30». */
+const looksLikePrice = (s) => /^\s*(цена[:\s]*)?\d+([.,]\d{1,2})?\s*(р|руб|₽)?\.?\s*$/i.test(s);
+
+/** Строка похожа на артикул: буквы+цифры и/или дефисы, без пробелов внутри. */
+const looksLikeArticle = (s) => /^[A-Za-zА-Яа-я0-9]+([-/][A-Za-zА-Яа-я0-9]+)+$/.test(s.trim()) ||
+  /^[A-Za-z]{2,}\d{2,}/.test(s.trim());
+
+/**
+ * Разбирает многострочную вставку в товар. Пользователь удобнее шлёт всё
+ * разом: название / артикул / цена на разных строках. Определяем строки по
+ * форме: число = цена, «код-с-дефисами» = артикул, остальное = название.
+ *
+ * @returns {{name, article, priceKop}} любое поле может быть null.
+ */
+export function parseProductBlock(text) {
+  const lines = String(text).split('\n').map((s) => s.trim()).filter(Boolean);
+  if (!lines.length) return { name: null, article: null, priceKop: null };
+
+  let name = null, article = null, priceKop = null;
+  const nameParts = [];
+  for (const line of lines) {
+    if (priceKop == null && looksLikePrice(line)) { priceKop = parsePrice(line); continue; }
+    if (article == null && looksLikeArticle(line) && line.split(/\s+/).length === 1) { article = line; continue; }
+    nameParts.push(line);
+  }
+  name = nameParts.join(' ').trim() || null;
+  return { name, article, priceKop };
+}
+
 const HTML = { parse_mode: 'HTML', link_preview_options: { is_disabled: true } };
 
 const rowKeyboard = (id) =>
@@ -94,13 +123,41 @@ export function registerHandlers(bot, db, opts = {}) {
   });
 
   bot.command('add', (ctx) => {
+    // Всё, что после «/add» — включая перенос строки и следующие строки.
+    const payload = (ctx.match || '').trim();
+    if (payload) return startAdd(ctx, payload);
+
     draft.set(ctx.chat.id, { step: STEP.NAME });
     return ctx.reply(
       '📝 <b>Название товара</b> — с характеристиками, как можно точнее.\n\n' +
       'Например:\n<code>Лампа LED A60 E27 3000K 11Вт 990Lm IEK</code>\n\n' +
-      'Чем полнее — тем точнее ищу: сверяю мощность, цоколь, форму, температуру.',
+      'Можно прислать всё разом — название, артикул и цену на отдельных строках:\n' +
+      '<code>Лампа LED A60 E27 3000K 11Вт IEK\nLLE-A60-11-230-30-E27\n30</code>',
       { parse_mode: 'HTML' });
   });
+
+  /**
+   * Разбирает введённый блок и решает: искать сразу или чего-то не хватает.
+   * Используется и из «/add <текст>», и с первого сообщения в диалоге.
+   */
+  async function startAdd(ctx, text) {
+    const { name, article, priceKop } = parseProductBlock(text);
+    if (!name) {
+      draft.set(ctx.chat.id, { step: STEP.NAME });
+      return ctx.reply('📝 Пришли название товара с характеристиками.');
+    }
+    if (priceKop != null) {
+      // Есть всё нужное — заводим и сразу ищем.
+      return finishAdd(ctx, { name, article }, priceKop);
+    }
+    // Название есть, цены нет — дособерём. Артикул сохраним, если был.
+    draft.set(ctx.chat.id, { step: STEP.PRICE, name, article: article ?? null });
+    if (article) return askPrice(ctx);
+    draft.get(ctx.chat.id).step = STEP.ARTICLE;
+    return ctx.reply(
+      '🔖 <b>Артикул производителя</b> — сильно повышает точность.\nЕсли нет — «Пропустить».',
+      { parse_mode: 'HTML', reply_markup: new InlineKeyboard().text('Пропустить', 'pm:noart') });
+  }
 
   bot.command('list', (ctx) => {
     const items = listProducts(db, ctx.from.id);
@@ -131,12 +188,10 @@ export function registerHandlers(bot, db, opts = {}) {
     const text = ctx.message.text.trim();
 
     if (d.step === STEP.NAME) {
-      d.name = text;
-      d.step = STEP.ARTICLE;
-      return ctx.reply(
-        '🔖 <b>Артикул производителя</b> — сильно повышает точность.\n' +
-        'Если нет — жми «Пропустить».',
-        { parse_mode: 'HTML', reply_markup: new InlineKeyboard().text('Пропустить', 'pm:noart') });
+      // На шаге названия тоже принимаем пачку: пользователь мог прислать
+      // /add, а следом название/артикул/цену одним блоком.
+      draft.delete(ctx.chat.id);
+      return startAdd(ctx, text);
     }
 
     if (d.step === STEP.ARTICLE) {
