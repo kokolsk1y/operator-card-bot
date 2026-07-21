@@ -38,14 +38,13 @@ function resultLine({ offer, match, deal }) {
  * @param {{results, stats}} search
  * @param {number} limit сколько позиций показать
  */
-export function renderSearch(product, { results, stats }, limit = 12) {
+export function renderSearch(product, { results }, limit = 12) {
   const head =
     `🔎 <b>${esc(product.name)}</b>\n` +
-    `наша закупочная: <b>${rub0(product.price_kop)}/шт</b>\n`;
+    `наша: <b>${rub0(product.price_kop)}/шт</b>\n`;
 
   if (!results.length) {
-    return head + '\nНичего похожего не нашлось. ' +
-      'Попробуй уточнить название — добавь бренд и характеристики.';
+    return head + '\nНичего похожего не нашлось. Уточни название — добавь бренд и характеристики.';
   }
 
   const deals = results.filter((r) => r.deal.worthIt);
@@ -53,24 +52,21 @@ export function renderSearch(product, { results, stats }, limit = 12) {
 
   let body = '';
   if (deals.length) {
-    body += `\n🔥 <b>Дешевле нашей (${deals.length}):</b>\n` +
-      deals.slice(0, limit).map(resultLine).join('\n') + '\n';
+    const show = deals.slice(0, limit);
+    body += `\n🔥 <b>Дешевле нашей — ${deals.length}:</b>\n` + show.map(resultLine).join('\n') + '\n';
+    if (deals.length > show.length) body += `<i>…и ещё ${deals.length - show.length}</i>\n`;
   } else {
     body += `\n<i>Дешевле ${rub0(product.price_kop)}/шт не нашлось.</i>\n`;
   }
 
-  // Немного «не дешевле» — чтобы видеть, что товар вообще на рынке и почём.
+  // Пара примеров «дороже» — чтобы видеть, почём товар на рынке.
   const restShow = rest.slice(0, deals.length ? 3 : 6);
   if (restShow.length) {
-    body += `\n▫️ <b>Есть на рынке (для ориентира):</b>\n` +
-      restShow.map(resultLine).join('\n') + '\n';
+    body += `\n▫️ <b>Для ориентира:</b>\n` + restShow.map(resultLine).join('\n') + '\n';
+    if (rest.length > restShow.length) body += `<i>…и ещё ${rest.length - restShow.length} дороже</i>\n`;
   }
 
-  const foot =
-    `\n<i>Проверено ${stats.found} предложений по ${stats.queries} запросам. ` +
-    `Точных совпадений: ${stats.matches}.</i>`;
-
-  return head + body + foot;
+  return head + body;
 }
 
 /** Карточка товара в списке /list. */
