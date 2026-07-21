@@ -28,7 +28,10 @@ export async function searchProduct(product) {
   const pool = new Map();
 
   for (const mp of enabledMarketplaces()) {
-    for (const q of queries) {
+    // Платные площадки (Ozon через Apify) ограничивают число запросов на товар,
+    // чтобы не жечь кредит. WB бесплатный — гоняет все запросы.
+    const mpQueries = queries.slice(0, mp.maxQueries ?? queries.length);
+    for (const q of mpQueries) {
       let offers;
       try {
         offers = await mp.search(q);

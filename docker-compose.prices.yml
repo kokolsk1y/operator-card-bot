@@ -17,7 +17,7 @@ services:
       - PRICES_BOT_TOKEN=${PRICES_BOT_TOKEN}
       - PRICES_ALLOWED_USERS=${PRICES_ALLOWED_USERS:-}
       - PRICES_DB_PATH=/app/data/prices.db
-      - PRICES_OZON_ENABLED=${PRICES_OZON_ENABLED:-0}
+      - PRICES_APIFY_TOKEN=${PRICES_APIFY_TOKEN:-}  # токен Apify → включает Ozon (пусто = только WB)
     extra_hosts:                      # тот же обход DNS-блока Telegram в РФ
       - "api.telegram.org:149.154.167.220"
     volumes:

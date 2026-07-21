@@ -1,50 +1,71 @@
-// Адаптер Ozon Бизнес (витрина для юрлиц — там живёт бейдж «Возврат НДС»).
+// Адаптер Ozon через Apify.
 //
-// Сетевой слой готов, разбор ответа готов и протестирован (ozon-parse.mjs).
-// Адаптер ВЫКЛЮЧЕН по умолчанию и включается флагом PRICES_OZON_ENABLED=1
-// ТОЛЬКО после успешного probe-ozon.mjs с российского IP — по двум причинам:
+// Прямой доступ к Озону невозможен: антибот кладёт и HTTP-клиент, и браузер со
+// стелсом, и мобильное API — проверено с российского IP (см. память проекта).
+// Поэтому ходим через готовый актор Apify (zen-studio/ozon-scraper-pro), который
+// держит ферму браузеров + прокси + решает капчу. Он отдаёт чистый JSON.
 //
-//   1. Ozon режет иностранные/датацентровые IP (ozon-antibot: 1, «выключите
-//      VPN»). С немецкого IP разработки — гарантированный 403. На сервере
-//      (Ростелеком, Калининград) должно открыться — там и проверяем.
-//   2. Виден ли бейдж «Возврат НДС» БЕЗ логина — пока неизвестно. Если нужен
-//      вход, это отдельное решение (бот пойдёт под закупочным аккаунтом).
-//
-// Пока флаг не выставлен — enabled()=false, и конвейер Озон просто не трогает.
-// WB при этом работает.
+// Оплата PAY_PER_EVENT из бесплатных $5/мес Apify. Поэтому ЭКОНОМИМ:
+//   - один запрос на товар (maxQueries: 1), а не четыре как у WB;
+//   - скромный maxResults.
+// Витрина розничная — бейджа «Возврат НДС» нет, поэтому vatReturnable = null
+// (pricing.mjs посчитает по полной цене, честно).
 
-import { getJson, makeThrottle } from './http.mjs';
-import { extractOffers } from './ozon-parse.mjs';
+const ACTOR = 'zen-studio~ozon-scraper-pro';
+const ENDPOINT = `https://api.apify.com/v2/acts/${ACTOR}/run-sync-get-dataset-items`;
 
-// Озон агрессивнее к частоте, чем WB — интервал больше.
-const throttle = makeThrottle(3500);
+const token = () => process.env.PRICES_APIFY_TOKEN || '';
 
-/** Витрина для юрлиц через composer-api. */
-const businessSearchUrl = (query) =>
-  'https://www.ozon.ru/api/composer-api.bx/page/json/v2?url=' +
-  encodeURIComponent(`/business/search/?text=${query}&from_global=true`);
-
-export async function searchProducts(query, { limit = 60 } = {}) {
-  const url = businessSearchUrl(query);
-  let json;
-  try {
-    json = await throttle(() => getJson(url, { attempts: 2, timeoutMs: 25000 }));
-  } catch (e) {
-    // 403/редирект-петля = антибот по IP. Наверх — понятной строкой.
-    throw new Error(`Ozon недоступен (${e.message}). Нужен российский IP (probe-ozon.mjs).`);
+/** Запускает актор и ждёт результат (датасет-элементы). */
+async function runActor(input, { timeoutMs = 150000 } = {}) {
+  const res = await fetch(`${ENDPOINT}?token=${token()}`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(input),
+    signal: AbortSignal.timeout(timeoutMs),
+  });
+  if (!res.ok) {
+    const body = await res.text().catch(() => '');
+    throw new Error(`Apify ответил ${res.status}: ${body.slice(0, 120)}`);
   }
-  return extractOffers(json).slice(0, limit);
+  return res.json();
 }
 
-/** В разовой модели не используется (finder ходит только через search). */
-export async function fetchPrices() {
-  return new Map();
+/** Элемент датасета актора → наш Offer. Экспортируется для теста. */
+export function toOffer(x) {
+  const rub = x.priceDecimal ??
+    (x.price ? parseInt(String(x.price).replace(/[^\d]/g, ''), 10) : null);
+  const orig = x.originalPriceDecimal ?? null;
+  const sku = x.sku != null ? String(x.sku) : '';
+  return {
+    marketplace: 'ozon',
+    id: sku,
+    name: x.title || '',
+    brand: (x.brand && x.brand.name) || '',
+    supplier: x.sellerTag || '',
+    supplierId: null,
+    stock: null,
+    url: x.url || (sku ? `https://www.ozon.ru/product/${sku}/` : ''),
+    priceKop: Number.isFinite(rub) ? rub * 100 : null,
+    basicKop: Number.isFinite(orig) ? orig * 100 : null,
+    // Розница: про НДС витрина молчит → «неизвестно», не выдумываем вычет.
+    vatReturnable: null,
+    vatRate: null,
+  };
+}
+
+export async function searchProducts(query, { maxResults = 20 } = {}) {
+  if (!token()) throw new Error('PRICES_APIFY_TOKEN не задан');
+  const items = await runActor({ queries: [query], maxResults, skipDetails: false });
+  return (Array.isArray(items) ? items : [])
+    .map(toOffer)
+    .filter((o) => o.id && o.name); // без названия матчить нечем
 }
 
 export const adapter = {
   id: 'ozon',
-  title: 'Ozon Бизнес',
-  enabled: () => process.env.PRICES_OZON_ENABLED === '1',
+  title: 'Ozon',
+  enabled: () => !!token(),
+  maxQueries: 1, // PAY_PER_EVENT — один запрос на товар, экономим кредит
   search: searchProducts,
-  prices: fetchPrices,
 };

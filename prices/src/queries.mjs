@@ -46,13 +46,15 @@ export function buildQueries(product) {
 
   const out = [];
 
-  // 1. Артикул — самый точный сигнал, когда он есть.
+  // 1. Бренд + характеристики: «IEK A60 E27 11Вт 3000K».
+  //    Самый универсально-надёжный запрос — идёт ПЕРВЫМ, потому что платные
+  //    площадки (Ozon) берут только первый запрос ради экономии кредита.
+  if (brand && tokens.length) out.push(`${brand} ${tokens.join(' ')}`);
+
+  // 2. Артикул — самый точный сигнал на WB, когда он есть.
   if (product.article && product.article.replace(/[^a-zа-я0-9]/gi, '').length >= 5) {
     out.push(product.article);
   }
-
-  // 2. Бренд + характеристики: «IEK A60 E27 11Вт 3000K».
-  if (brand && tokens.length) out.push(`${brand} ${tokens.join(' ')}`);
 
   // 3. Тип + характеристики без бренда: «лампа A60 E27 11Вт 3000K».
   //    Ловит перепродавцов, не указавших бренд в названии.
@@ -60,6 +62,9 @@ export function buildQueries(product) {
 
   // 4. Бренд + тип + пара главных характеристик — пошире, если выше пусто.
   if (brand && type && tokens.length) out.push(`${brand} ${type} ${tokens.slice(0, 2).join(' ')}`);
+
+  // Фолбэк для Ozon-first: если бренда нет, первым будет тип+характеристики.
+  if (!out.length && type && tokens.length) out.push(`${type} ${tokens.join(' ')}`);
 
   // Фолбэк: если характеристик не вытащили (нестандартный товар) — само название.
   if (!out.length) out.push(product.name);

@@ -112,6 +112,7 @@ export const adapter = {
   id: 'wb',
   title: 'Wildberries',
   enabled: () => true, // проверено вживую 2026-07-16
+  maxQueries: Infinity, // открытый API, бесплатно — гоняем все запросы
   search: searchProducts,
   prices: fetchPrices,
 };
