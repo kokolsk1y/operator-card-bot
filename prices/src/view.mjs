@@ -16,7 +16,7 @@ const TARGET_REGION = process.env.PRICES_REGION_LABEL || 'Калининград
 
 /** Одна строка результата: флаг · цена/шт · площадка · название · продавец. */
 function resultLine({ offer, match, deal }) {
-  const flag = deal.worthIt ? '🔥' : '▫️';
+  const flag = deal.worthIt ? '🔥' : (deal.needsVatCheck ? '⚠️' : '▫️');
   const mp = MP[offer.marketplace] || offer.marketplace;
   const seller = offer.supplier ? ` · ${esc(offer.supplier.slice(0, 22))}` : '';
   const title = esc(offer.name.slice(0, 46));
@@ -32,9 +32,14 @@ function resultLine({ offer, match, deal }) {
   const priceKind = offer.marketplace === 'ozon' && offer.priceKind === 'card'
     ? ' · карта/акция'
     : '';
+  const vat = deal.vatStatus === 'confirmed22'
+    ? ' · ✅ НДС 22%'
+    : deal.vatStatus === 'unknown'
+      ? ' · ⚠️ НДС проверить вручную'
+      : ' · ❌ нет подтверждённого НДС 22%';
 
   return `${flag} <a href="${esc(offer.url)}">${priceStr}</a> · ${mp}\n` +
-         `   ${title}${seller}${priceKind}`;
+         `   ${title}${seller}${priceKind}${vat}`;
 }
 
 /**
@@ -53,15 +58,23 @@ export function renderSearch(product, { results }, limit = 12) {
   }
 
   const deals = results.filter((r) => r.deal.worthIt);
-  const rest = results.filter((r) => !r.deal.worthIt);
+  const vatChecks = results.filter((r) => r.deal.needsVatCheck);
+  const rest = results.filter((r) => !r.deal.worthIt && !r.deal.needsVatCheck);
 
   let body = '';
   if (deals.length) {
     const show = deals.slice(0, limit);
-    body += `\n🔥 <b>Дешевле нашей — ${deals.length}:</b>\n` + show.map(resultLine).join('\n') + '\n';
+    body += `\n🔥 <b>Дешевле и подтверждён НДС 22% — ${deals.length}:</b>\n` + show.map(resultLine).join('\n') + '\n';
     if (deals.length > show.length) body += `<i>…и ещё ${deals.length - show.length}</i>\n`;
   } else {
-    body += `\n<i>Дешевле ${rub0(product.price_kop)}/шт не нашлось.</i>\n`;
+    body += `\n<i>Выгодных товаров с подтверждённым НДС 22% не нашлось.</i>\n`;
+  }
+
+  if (vatChecks.length) {
+    const show = vatChecks.slice(0, limit);
+    body += `\n⚠️ <b>Дешевле, но НДС 22% проверить вручную — ${vatChecks.length}:</b>\n` +
+      show.map(resultLine).join('\n') + '\n';
+    if (vatChecks.length > show.length) body += `<i>…и ещё ${vatChecks.length - show.length} на проверку</i>\n`;
   }
 
   // Пара примеров «дороже» — чтобы видеть, почём товар на рынке.

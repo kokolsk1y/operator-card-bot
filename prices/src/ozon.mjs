@@ -88,6 +88,7 @@ export function toOffer(x, { details = false } = {}) {
   // для сравнения не используется.
   const rub = card ?? regular;
   const sku = x.sku != null ? String(x.sku) : '';
+  const vat = detectVat(x);
   return {
     marketplace: 'ozon',
     id: sku,
@@ -104,9 +105,31 @@ export function toOffer(x, { details = false } = {}) {
     priceKind: Number.isFinite(card) ? 'card' : 'regular',
     priceVerified: details,
     // Розница: про НДС витрина молчит → «неизвестно», не выдумываем вычет.
-    vatReturnable: null,
-    vatRate: null,
+    vatReturnable: vat.returnable,
+    vatRate: vat.rate,
   };
+}
+
+/** Ищет явную пометку НДС в лейблах/характеристиках полной карточки. */
+export function detectVat(value) {
+  const strings = [];
+  const visit = (node) => {
+    if (typeof node === 'string') strings.push(node);
+    else if (Array.isArray(node)) node.forEach(visit);
+    else if (node && typeof node === 'object') Object.values(node).forEach(visit);
+  };
+  visit(value);
+
+  for (const raw of strings) {
+    const text = raw.toUpperCase().replace(/Ё/g, 'Е').replace(/\s+/g, ' ');
+    if (/(?:БЕЗ НДС|VAT\s*FREE)/.test(text)) return { returnable: false, rate: null };
+    const match = text.match(/(?:НДС|VAT)\s*[:\-]?\s*(\d{1,2})\s*%?|\b(\d{1,2})\s*%\s*(?:НДС|VAT)/);
+    if (match) {
+      const rate = Number(match[1] || match[2]);
+      return { returnable: true, rate };
+    }
+  }
+  return { returnable: null, rate: null };
 }
 
 export async function searchProducts(query, { maxResults = 20 } = {}) {

@@ -44,10 +44,24 @@ test('ловушка УСН: делить на 1.22 без возврата НД
 
 test('цена лота делится на количество', () => {
   // 10 ламп за 250 ₽ = 25 ₽/шт — дешевле нашей закупочной в 30 ₽.
-  const r = evaluateOffer({ priceKop: 25000, pack: 10, vatReturnable: false, vatRate: null }, OUR);
+  const r = evaluateOffer({ priceKop: 25000, pack: 10, vatReturnable: true, vatRate: 22 }, OUR);
   assert.equal(r.unitKop, 2500);
   assert.equal(r.worthIt, true);
   assert.match(r.why, /лот 250\.00 ₽ ÷ 10 шт/);
+});
+
+test('дешёвая цена с неизвестным НДС идёт на ручную проверку, а не в готовые находки', () => {
+  const r = evaluateOffer({ priceKop: 2500, pack: 1, vatReturnable: null, vatRate: null }, OUR);
+  assert.equal(r.worthIt, false);
+  assert.equal(r.needsVatCheck, true);
+  assert.equal(r.vatStatus, 'unknown');
+});
+
+test('дешёвый товар с известной ставкой 10% не подходит под требование НДС 22%', () => {
+  const r = evaluateOffer({ priceKop: 2500, pack: 1, vatReturnable: true, vatRate: 10 }, OUR);
+  assert.equal(r.worthIt, false);
+  assert.equal(r.needsVatCheck, false);
+  assert.equal(r.vatStatus, 'not22');
 });
 
 test('связка из 2 штук за 390 ₽ (реальная находка на WB) — мимо', () => {

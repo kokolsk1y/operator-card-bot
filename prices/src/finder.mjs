@@ -97,7 +97,8 @@ export async function searchProduct(product) {
 
   // Сортировка: выгодные вперёд, внутри — по цене за штуку, затем по уверенности.
   results.sort((a, b) => {
-    if (a.deal.worthIt !== b.deal.worthIt) return a.deal.worthIt ? -1 : 1;
+    const rank = (x) => x.deal.worthIt ? 2 : (x.deal.needsVatCheck ? 1 : 0);
+    if (rank(a) !== rank(b)) return rank(b) - rank(a);
     const ua = a.deal.unitKop ?? Infinity;
     const ub = b.deal.unitKop ?? Infinity;
     if (ua !== ub) return ua - ub;
@@ -108,6 +109,7 @@ export async function searchProduct(product) {
     queries: queries.length,
     found: pool.size,
     deals: results.filter((r) => r.deal.worthIt).length,
+    vatChecks: results.filter((r) => r.deal.needsVatCheck).length,
     matches: results.filter((r) => r.match.verdict === 'match').length,
   };
 

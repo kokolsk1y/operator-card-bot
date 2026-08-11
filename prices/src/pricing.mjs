@@ -32,7 +32,7 @@ export function netCost(kop, vatReturnable, vatRate) {
  *        priceKop — цена ЛОТА (не штуки!), pack — штук в лоте
  * @param {{priceKop:number, priceHasVat:boolean, vatRate:number|null}} our
  *        priceKop — наша закупочная за ШТУКУ
- * @returns {{unitKop, offerNetKop, ourNetKop, savingKop, worthIt, why}}
+ * @returns {{unitKop, offerNetKop, ourNetKop, savingKop, worthIt, needsVatCheck, vatStatus, why}}
  */
 export function evaluateOffer(offer, our) {
   const pack = Math.max(1, offer.pack || 1);
@@ -40,7 +40,7 @@ export function evaluateOffer(offer, our) {
 
   if (unitKop == null) {
     return { unitKop: null, offerNetKop: null, ourNetKop: null, savingKop: null,
-             worthIt: false, why: 'цена неизвестна' };
+             worthIt: false, needsVatCheck: false, vatStatus: 'unknown', why: 'цена неизвестна' };
   }
 
   const offerNetKop = netCost(unitKop, offer.vatReturnable, offer.vatRate);
@@ -50,26 +50,40 @@ export function evaluateOffer(offer, our) {
   const ourNetKop = netCost(our.priceKop, our.priceHasVat, our.vatRate);
 
   const savingKop = ourNetKop - offerNetKop;
-  const worthIt = savingKop > 0;
+  const priceAdvantage = savingKop > 0;
+  const vatConfirmed22 = offer.vatReturnable === true && offer.vatRate === 22;
+  const vatUnknown = offer.vatReturnable == null || offer.vatRate == null;
+  const vatStatus = vatConfirmed22 ? 'confirmed22' : (vatUnknown ? 'unknown' : 'not22');
+
+  // Главное условие заказчика: готовая находка обязана иметь подтверждённый НДС 22%.
+  // Неизвестный НДС не выдаём за выгоду, но сохраняем как кандидата на ручную проверку.
+  const worthIt = priceAdvantage && vatConfirmed22;
+  const needsVatCheck = priceAdvantage && vatUnknown;
 
   return {
-    unitKop, offerNetKop, ourNetKop, savingKop, worthIt,
-    why: explain({ pack, unitKop, offer, offerNetKop, ourNetKop, savingKop, worthIt }),
+    unitKop, offerNetKop, ourNetKop, savingKop, worthIt, needsVatCheck, vatStatus,
+    why: explain({ pack, unitKop, offer, offerNetKop, ourNetKop, savingKop, worthIt, needsVatCheck, vatStatus }),
   };
 }
 
-function explain({ pack, unitKop, offer, offerNetKop, ourNetKop, savingKop, worthIt }) {
+function explain({ pack, unitKop, offer, offerNetKop, ourNetKop, savingKop, worthIt, needsVatCheck, vatStatus }) {
   const bits = [];
   if (pack > 1) bits.push(`лот ${r(offer.priceKop)} ÷ ${pack} шт = ${r(unitKop)}/шт`);
   bits.push(
-    offer.vatReturnable && offer.vatRate
-      ? `возврат НДС ${offer.vatRate}% → чистая ${r(offerNetKop)}`
-      : 'НДС не возвращается → платим полную',
+    vatStatus === 'confirmed22'
+      ? `НДС 22% подтверждён → чистая ${r(offerNetKop)}`
+      : vatStatus === 'unknown'
+        ? 'НДС 22% не указан — нужна ручная проверка'
+        : `НДС 22% не подтверждён${offer.vatRate ? ` (указано ${offer.vatRate}%)` : ''}`,
   );
   bits.push(
     worthIt
       ? `дешевле нашей (${r(ourNetKop)}) на ${r(savingKop)}/шт`
-      : `дороже нашей (${r(ourNetKop)}) на ${r(-savingKop)}/шт`,
+      : needsVatCheck
+        ? `по полной цене дешевле на ${r(savingKop)}/шт, но сначала проверить НДС`
+        : savingKop > 0
+          ? 'по цене дешевле, но нет подтверждённого НДС 22%'
+          : `дороже нашей (${r(ourNetKop)}) на ${r(-savingKop)}/шт`,
   );
   return bits.join('; ');
 }

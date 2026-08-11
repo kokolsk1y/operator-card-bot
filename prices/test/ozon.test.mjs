@@ -2,7 +2,7 @@
 // Пример — реальный элемент датасета zen-studio/ozon-scraper-pro (2026-07-21).
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { toOffer } from '../src/ozon.mjs';
+import { toOffer, detectVat } from '../src/ozon.mjs';
 import { matchProduct } from '../src/match.mjs';
 
 const REAL = {
@@ -60,6 +60,17 @@ test('полная карточка Ozon: берём более низкую ц�
   assert.equal(o.basicKop, 278_800);
   assert.equal(o.priceKind, 'card');
   assert.equal(o.priceVerified, true);
+});
+
+test('бейдж "22% НДС можно вернуть" подтверждает ставку', () => {
+  assert.deepEqual(detectVat({ marketingLabels: ['22% НДС можно вернуть'] }), { returnable: true, rate: 22 });
+  const o = toOffer({ sku: 22, title: 'товар', priceDecimal: 122, marketingLabels: ['22% НДС можно вернуть'] }, { details: true });
+  assert.equal(o.vatReturnable, true);
+  assert.equal(o.vatRate, 22);
+});
+
+test('без явной пометки НДС остаётся неизвестным', () => {
+  assert.deepEqual(detectVat({ marketingLabels: ['Хорошая цена'] }), { returnable: null, rate: null });
 });
 
 test('цена из строки, если нет priceDecimal', () => {
