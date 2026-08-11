@@ -16,8 +16,14 @@
 
 import { getJson, makeThrottle } from './http.mjs';
 
-/** Регион доставки. От него зависит цена и наличие — менять осознанно. */
-const DEST = -1257786;
+/**
+ * Регион доставки. От него зависят цена и наличие.
+ * -331411 получен публичным geo endpoint WB для центра Калининграда.
+ */
+const configuredDest = Number(process.env.PRICES_WB_DEST);
+export const DEST = Number.isInteger(configuredDest) && configuredDest !== 0
+  ? configuredDest
+  : -331411;
 
 /** Скидка постоянного покупателя. Влияет на витринную цену в ответе. */
 const SPP = 30;

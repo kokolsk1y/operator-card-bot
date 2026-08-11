@@ -15,7 +15,7 @@ if ! grep -q '^PRICES_BOT_TOKEN=..*' .env 2>/dev/null; then
   echo "   Добавь строки (второй бот от @BotFather, НЕ токен бота карточек):"
   echo "     PRICES_BOT_TOKEN=<токен>"
   echo "     PRICES_ALLOWED_USERS=          # пусто = открыт всем; или id через запятую"
-  echo "     PRICES_OZON_ENABLED=0          # включим после проверки ниже"
+  echo "     PRICES_APIFY_TOKEN=            # пусто = только WB; токен включает Ozon через Apify"
   exit 1
 fi
 
@@ -27,15 +27,12 @@ echo "== 2/3 Логи (последние 20 строк) =="
 $SUDO docker compose logs --tail=20 prices
 
 echo
-echo "== 3/3 Проверка Ozon с этого (российского) IP =="
-echo "   (если сервер в РФ — Ozon должен открыться, в отличие от машины с VPN)"
-$SUDO docker compose exec -T prices node probe-ozon.mjs || true
-
-echo
-echo "──────────────────────────────────────────────────────────────"
-echo "Дальше по итогу probe выше:"
-echo "  • Ozon открылся и виден бейдж «Возврат НДС» → включаем Ozon:"
-echo "      sed -i 's/^PRICES_OZON_ENABLED=.*/PRICES_OZON_ENABLED=1/' .env"
-echo "      $SUDO docker compose up -d prices"
-echo "  • Ozon дал 403/редирект → пришли вывод probe, разберёмся."
-echo "  • Бот карточек всё это время работает как работал — его не трогали."
+echo "== 3/3 Площадки =="
+if grep -q '^PRICES_APIFY_TOKEN=..*' .env 2>/dev/null; then
+  echo "  • Wildberries включён."
+  echo "  • Ozon включён через Apify. Запросы могут расходовать кредит Apify."
+else
+  echo "  • Wildberries включён."
+  echo "  • Ozon выключен: PRICES_APIFY_TOKEN пуст."
+fi
+echo "  • Бот карточек не перезапускался."

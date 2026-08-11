@@ -47,6 +47,38 @@ export async function searchProduct(product) {
         if (!prev || match.confidence > prev.match.confidence) pool.set(key, { offer, match });
       }
     }
+
+    // Ozon сначала возвращает дешёвые поисковые плитки. Полные карточки и
+    // карточные/акционные цены запрашиваем только для прошедших отсев позиций.
+    if (mp.enrich) {
+      const entries = [...pool.entries()]
+        .filter(([key]) => key.startsWith(`${mp.id}:`))
+        .sort((a, b) => {
+          const av = a[1].match.verdict === 'match' ? 1 : 0;
+          const bv = b[1].match.verdict === 'match' ? 1 : 0;
+          const au = (a[1].offer.priceKop ?? Infinity) / (a[1].match.pack || 1);
+          const bu = (b[1].offer.priceKop ?? Infinity) / (b[1].match.pack || 1);
+          return bv - av || b[1].match.confidence - a[1].match.confidence || au - bu;
+        })
+        .slice(0, mp.maxEnrich ?? Infinity);
+      if (entries.length) {
+        try {
+          const enriched = await mp.enrich(entries.map(([, value]) => value.offer));
+          const byId = new Map(enriched.map((offer) => [String(offer.id), offer]));
+          for (const [key, value] of entries) {
+            const offer = byId.get(String(value.offer.id));
+            if (!offer) continue;
+            const match = matchProduct(ref, offer);
+            if (match.verdict === 'reject') pool.delete(key);
+            else pool.set(key, { offer, match });
+          }
+        } catch (e) {
+          // Не подменяем результат ошибкой: оставляем плиточную цену, но view
+          // отметит её знаком ≈ как неподтверждённую полной карточкой.
+          console.error(`${mp.id} уточнение цен: ${e.message}`);
+        }
+      }
+    }
   }
 
   const our = {

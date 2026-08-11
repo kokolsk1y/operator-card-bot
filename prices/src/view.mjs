@@ -12,6 +12,7 @@ export function esc(s) {
 }
 
 const MP = { wb: 'WB', ozon: 'OZ' };
+const TARGET_REGION = process.env.PRICES_REGION_LABEL || 'Калининград';
 
 /** Одна строка результата: флаг · цена/шт · площадка · название · продавец. */
 function resultLine({ offer, match, deal }) {
@@ -23,13 +24,17 @@ function resultLine({ offer, match, deal }) {
   // Крупно — цена ЛОТА (ровно то, что покажет страница по ссылке), чтобы при
   // клике цифра совпадала. Для связок рядом даём расчёт за штуку, по которому
   // бот и сравнивает с нашей закупочной.
-  const lot = rub0(offer.priceKop);
+  const approximate = offer.marketplace === 'ozon' && !offer.priceVerified;
+  const lot = `${approximate ? '≈' : ''}${rub0(offer.priceKop)}`;
   const priceStr = match.pack > 1
     ? `<b>${lot}</b> за ${match.pack} шт = ${rub0(deal.unitKop)}/шт`
     : `<b>${lot}</b>`;
+  const priceKind = offer.marketplace === 'ozon' && offer.priceKind === 'card'
+    ? ' · карта/акция'
+    : '';
 
   return `${flag} <a href="${esc(offer.url)}">${priceStr}</a> · ${mp}\n` +
-         `   ${title}${seller}`;
+         `   ${title}${seller}${priceKind}`;
 }
 
 /**
@@ -64,6 +69,11 @@ export function renderSearch(product, { results }, limit = 12) {
   if (restShow.length) {
     body += `\n▫️ <b>Для ориентира:</b>\n` + restShow.map(resultLine).join('\n') + '\n';
     if (rest.length > restShow.length) body += `<i>…и ещё ${rest.length - restShow.length} дороже</i>\n`;
+  }
+
+  const hasOzon = results.some((r) => r.offer.marketplace === 'ozon');
+  if (hasOzon) {
+    body += `\n<i>Ozon: цена без входа и без фиксации региона. Для региона «${esc(TARGET_REGION)}» итог в приложении или корзине может отличаться.</i>`;
   }
 
   return head + body;

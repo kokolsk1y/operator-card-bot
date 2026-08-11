@@ -28,6 +28,7 @@ function specTokens(specs) {
   if (specs.keys) t.push(`${specs.keys}кл`);
   if (specs.posts) t.push(`${specs.posts}пост`);
   if (specs.current) t.push(`${specs.current}А`);
+  if (specs.poles) t.push(`${specs.poles}P`);
   return t;
 }
 

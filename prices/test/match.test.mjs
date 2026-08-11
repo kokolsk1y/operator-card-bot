@@ -103,3 +103,72 @@ test('ГЛАВНОЕ: на реальной выдаче WB матчер отс�
   const rejected = verdicts.filter((v) => v.r.verdict === 'reject').length;
   assert.ok(rejected >= 90, `отсеяно всего ${rejected} из 100`);
 });
+
+test('автомат B4/1 разбирается как B, 4 А, 1 полюс, 4.5 kA', () => {
+  assert.deepEqual(
+    extractSpecs('Автоматический выключатель ВА47-29 B4/1 4,5kA IEK'),
+    { current: 4, curve: 'B', poles: 1, breakingKa: 4.5 },
+  );
+});
+
+test('автомат 16 А не проходит вместо B4/1', () => {
+  const ref = { name: 'Автоматический выключатель ВА47-29 B4/1 4,5kA IEK', brand: 'IEK' };
+  const cand = { name: 'MVA20-1-016-B Выключатель однополюсный ВА47-29 (12 шт.)', brand: 'IEK' };
+  const r = matchProduct(ref, cand);
+  assert.equal(r.verdict, 'reject');
+  assert.ok(r.contradicted.some((x) => x.startsWith('current:')));
+});
+
+test('характеристика C4 не проходит вместо B4', () => {
+  const ref = { name: 'Автоматический выключатель ВА47-29 B4/1 4,5kA IEK', brand: 'IEK' };
+  const cand = { name: 'Автоматический выключатель ВА47-29 1P 4A C4 IEK', brand: 'IEK' };
+  const r = matchProduct(ref, cand);
+  assert.equal(r.verdict, 'reject');
+  assert.ok(r.contradicted.some((x) => x.startsWith('curve:')));
+});
+
+test('артикул MVA20-1-004-B совпадает с B4/1', () => {
+  const ref = { name: 'Автоматический выключатель ВА47-29 B4/1 4,5kA IEK', brand: 'IEK' };
+  const cand = { name: 'MVA20-1-004-B Выключатель однополюсный ВА47-29 4,5kA', brand: 'IEK' };
+  const r = matchProduct(ref, cand);
+  assert.notEqual(r.verdict, 'reject');
+  assert.equal(r.pack, 1);
+});
+
+test('реальная запись C 4А не проходит вместо B 4А', () => {
+  const ref = { name: 'Автоматический выключатель ВА47-29 B4/1 4,5kA IEK', brand: 'IEK' };
+  const cand = { name: 'Автоматический выключатель 1P C 4А 4,5кА, KARAT' };
+  const r = matchProduct(ref, cand);
+  assert.equal(extractSpecs(cand.name).curve, 'C');
+  assert.equal(r.verdict, 'reject');
+});
+
+test('посторонний товар не попадает в ориентиры для автомата', () => {
+  const ref = { name: 'Автоматический выключатель ВА47-29 B4/1 4,5kA IEK', brand: 'IEK' };
+  const cand = { name: 'С-образное крепление для смесителя Профсан IEK' };
+  assert.equal(matchProduct(ref, cand).verdict, 'reject');
+});
+
+test('отдельная запись "тип C" отсеивается вместо типа B', () => {
+  const ref = { name: 'Автоматический выключатель ВА47-29 B16/1 IEK', brand: 'IEK' };
+  const cand = { name: 'Автоматический выключатель IEK 16А 1P 4,5кА тип С, 3шт' };
+  assert.equal(extractSpecs(cand.name).curve, 'C');
+  assert.equal(matchProduct(ref, cand).verdict, 'reject');
+});
+
+test('запись "16A C" отсеивается вместо "16A B"', () => {
+  const ref = { name: 'Автоматический выключатель ВА47-29 B16/1 IEK', brand: 'IEK' };
+  const cand = { name: 'ARMAT Автоматический выключатель M06N 1P 16А C IEK' };
+  assert.equal(extractSpecs(cand.name).curve, 'C');
+  assert.equal(matchProduct(ref, cand).verdict, 'reject');
+});
+
+test('записи "4,5кА C" и "однополюсный C" отсеиваются вместо B', () => {
+  const ref = { name: 'Автоматический выключатель ВА47-29 B16/1 IEK', brand: 'IEK' };
+  const afterKa = { name: 'KARAT Автоматический выключатель ВА47-29 1Р 16А 4,5кА С IEK' };
+  const afterPole = { name: 'Автоматический выключатель 16А однополюсный C IEK ARMAT' };
+  assert.equal(extractSpecs(afterKa.name).curve, 'C');
+  assert.equal(extractSpecs(afterPole.name).curve, 'C');
+  assert.equal(matchProduct(ref, afterKa).verdict, 'reject');
+  assert.equal(matchProduct(ref, afterPole).verdict, 'reject');
+});

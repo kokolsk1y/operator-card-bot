@@ -10,7 +10,7 @@
 // не засчитывать его как подтверждённый.
 
 import { canonArticle } from './normalize.mjs';
-import { extractSpecs, extractPack, shapeFamily, HARD_SPECS, SPEC_WEIGHT } from './specs.mjs';
+import { extractSpecs, extractPack, productFamily, shapeFamily, HARD_SPECS, SPEC_WEIGHT } from './specs.mjs';
 
 /** Порог уверенности, выше которого товар считаем совпавшим. */
 const MATCH_THRESHOLD = 0.7;
@@ -56,6 +56,12 @@ export function matchProduct(ref, cand) {
   const done = (verdict, confidence, reason) => ({
     verdict, confidence, pack, matched, contradicted, unknown, reason,
   });
+
+  // Для автоматов категория надёжно определяется по названию/серии. Не пропускаем
+  // крепления, карты и другой поисковый мусор в список "для ориентира".
+  if (productFamily(ref.name) === 'breaker' && productFamily(cand.name) !== 'breaker') {
+    return done('reject', 0, 'другая категория товара');
+  }
 
   for (const key of Object.keys(refSpecs)) {
     const a = refSpecs[key];

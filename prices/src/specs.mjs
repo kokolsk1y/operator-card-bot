@@ -42,6 +42,14 @@ export function shapeFamily(shape) {
   return { A: 'A-ГРУША', C: 'C-СВЕЧА', G: 'G-ШАР', R: 'R-РЕФЛ' }[letter] ?? null;
 }
 
+/** Узкая категория для отсева явно посторонних товаров. */
+export function productFamily(text) {
+  const c = canon(text);
+  if (c.includes(W('автомат')) || c.includes(W('выключател')) ||
+      /\bMVA20\b/.test(c) || /\bBA\s?47/.test(c)) return 'breaker';
+  return null;
+}
+
 /**
  * Разбирает название в набор характеристик.
  * Отсутствующая характеристика = undefined (не 0 и не null) — это важно:
@@ -50,6 +58,7 @@ export function shapeFamily(shape) {
 export function extractSpecs(text) {
   const c = canon(text);
   const s = {};
+  const isBreaker = productFamily(c) === 'breaker';
 
   // Цоколь: E27 / E14 / E40, GU10, GU5.3, G4 / G9 / G13.
   // G с 1-2 цифрами до 13 — цоколь; G45/G95/G120 — форма колбы, ловится ниже.
@@ -92,6 +101,53 @@ export function extractSpecs(text) {
   // Ток, А: «16А»→«16A». Цифры идут ПЕРЕД буквой, поэтому с формой A60 не путается.
   if ((m = c.match(/\b(\d{1,2})\s*A\b/))) s.current = parseInt(m[1], 10);
 
+  if (isBreaker) {
+    // Артикул IEK MVA20-1-016-B: 1 полюс, 16 А, характеристика B.
+    const byArticle = c.match(/\bMVA20[- ](\d)[- ]0*(\d{1,3})[- ]([BCD])\b/);
+    if (byArticle) {
+      s.poles = parseInt(byArticle[1], 10);
+      s.current = parseInt(byArticle[2], 10);
+      s.curve = byArticle[3];
+    }
+
+    // Короткое обозначение B4/1: характеристика B, 4 А, 1 полюс.
+    const short = c.match(/\b([BCD])\s*(\d{1,3})\s*\/\s*(\d)\b/);
+    if (short) {
+      s.curve = short[1];
+      s.current = parseInt(short[2], 10);
+      s.poles = parseInt(short[3], 10);
+    } else if (!s.curve && (m = c.match(/\b([BCD])\s*(\d{1,3})(?=\b|\s*A\b)/))) {
+      // C16 / B 4. Не применяем к лампам благодаря isBreaker.
+      s.curve = m[1];
+      if (s.current === undefined) s.current = parseInt(m[2], 10);
+    } else if (!s.curve && (m = c.match(new RegExp(`(?:${W('тип')}|${W('характеристика')})\\s*([BCD])\\b`)))) {
+      // "тип C" / "характеристика B", когда ток указан отдельно.
+      s.curve = m[1];
+    } else if (!s.curve && (m = c.match(/\b\d{1,3}\s*A\s*([BCD])\b/))) {
+      // "16A C": буква сразу после тока однозначно задаёт характеристику.
+      s.curve = m[1];
+    } else if (!s.curve && (m = c.match(/\b\d{1,2}(?:[.,]\d)?\s*KA\s*([BCD])\b/))) {
+      // "4,5кА C": характеристика после отключающей способности.
+      s.curve = m[1];
+    } else if (!s.curve && (m = c.match(new RegExp(`${W('однополюс')}[^ ]*\\s*([BCD])\\b`)))) {
+      // "однополюсный C": короткая витринная запись Ozon.
+      s.curve = m[1];
+    }
+
+    if (s.poles === undefined) {
+      if ((m = c.match(/\b([1-4])\s*(?:P|П)\b/))) s.poles = parseInt(m[1], 10);
+      else if (c.includes(W('однополюс'))) s.poles = 1;
+      else if (c.includes(W('двухполюс'))) s.poles = 2;
+      else if (c.includes(W('трехполюс')) || c.includes(W('трёхполюс'))) s.poles = 3;
+      else if (c.includes(W('четырехполюс')) || c.includes(W('четырёхполюс'))) s.poles = 4;
+    }
+
+    // Отключающая способность: 4,5 kA / 6 kA.
+    if ((m = c.match(/\b(\d{1,2}(?:[.,]\d)?)\s*KA\b/))) {
+      s.breakingKa = parseFloat(m[1].replace(',', '.'));
+    }
+  }
+
   // Степень защиты.
   if ((m = c.match(/\bIP\s?(\d{2})\b/))) s.ip = `IP${m[1]}`;
 
@@ -126,10 +182,13 @@ export function extractPack(text) {
 }
 
 /** Характеристики, по которым расхождение = точно другой товар. */
-export const HARD_SPECS = ['socket', 'shape', 'power', 'cct', 'current', 'keys', 'posts'];
+export const HARD_SPECS = [
+  'socket', 'shape', 'power', 'cct', 'current', 'curve', 'poles', 'breakingKa', 'keys', 'posts',
+];
 
 /** Вес характеристики при подсчёте уверенности. */
 export const SPEC_WEIGHT = {
   socket: 3, shape: 3, power: 3, cct: 2,
-  current: 2, keys: 2, posts: 2, lumens: 1, voltage: 1, ip: 1,
+  current: 3, curve: 2, poles: 2, breakingKa: 2,
+  keys: 2, posts: 2, lumens: 1, voltage: 1, ip: 1,
 };
