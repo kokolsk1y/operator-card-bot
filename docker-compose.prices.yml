@@ -19,6 +19,7 @@ services:
       - PRICES_DB_PATH=/app/data/prices.db
       - PRICES_APIFY_TOKEN=${PRICES_APIFY_TOKEN:-}  # токен Apify → включает Ozon (пусто = только WB)
       - PRICES_WB_DEST=${PRICES_WB_DEST:--331411}  # Калининград
+      - PRICES_WB_GAP_MS=${PRICES_WB_GAP_MS:-3500}  # защита от 429 Wildberries
       - PRICES_REGION_LABEL=${PRICES_REGION_LABEL:-Калининград}
     extra_hosts:                      # тот же обход DNS-блока Telegram в РФ
       - "api.telegram.org:149.154.167.220"

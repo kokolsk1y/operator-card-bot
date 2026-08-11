@@ -31,8 +31,9 @@ const SPP = 30;
 /** Максимум ID в одном запросе цен. Проверено: 60 проходит. */
 const CHUNK = 50;
 
-/** Минимальный интервал между запросами к WB. 429 ловится уже на 4-м подряд. */
-const throttle = makeThrottle(1200);
+/** Минимальный интервал между запросами к WB. 1.2 с вызывали 429 уже на 4-м запросе. */
+const configuredGap = Number(process.env.PRICES_WB_GAP_MS);
+const throttle = makeThrottle(Number.isFinite(configuredGap) && configuredGap >= 1000 ? configuredGap : 3500);
 
 const wbGet = (url) => throttle(() => getJson(url));
 
